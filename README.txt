@@ -48,3 +48,25 @@ with live two-player presence. It is the online lobby foundation; synchronized t
 selection and combat are the next integration phase. Local and computer modes are
 unchanged. The room state is currently a lobby only; do not treat room connection
 as completed online gameplay yet.
+
+ONLINE BATTLE ALPHA (Firebase)
+------------------------------
+This build adds an online two-phone battle flow to the existing browser game:
+- Host creates a room; friend joins with six-character code.
+- Host starts a match and deals 15 distinct cards to each player (3 each Levels 1-4, 2 Level 5, 1 Level 6).
+- Each player selects a different Captain and Vice Captain and locks their team.
+- Each player selects a current-level fighter and one of five attack styles.
+- Host resolves both attacks together using the same pre-round stats, then both clients receive the shared result.
+- Existing local/computer game code and 120-card data are retained.
+
+IMPORTANT SECURITY / TEST STATUS
+--------------------------------
+This is an integration alpha, not production-secure multiplayer. The currently published Realtime Database rules allow each room member to read the room object, so private selections are hidden by the interface but are not cryptographically/private-rule protected against a technically curious opponent. Do not use this for competitive or sensitive play until the rules and private data paths are redesigned and validated. A trusted server/Cloud Function should validate turns and resolve combat for production fairness.
+
+Deployment:
+1. Upload/replace index.html, app.js, style.css, cards.json, firebase-online.js, and assets/portraits/* in the GitHub Pages repository, preserving paths.
+2. Keep Firebase Realtime Database rules as currently configured for this alpha.
+3. Open the HTTPS site on both phones. Host creates a room; friend joins; host taps Start Online Game.
+4. Each player confirms Captain/Vice, then chooses a fighter/style and locks. Host device resolves each round and advances.
+
+The JavaScript syntax and archive integrity were checked. A real two-device end-to-end battle test has NOT been performed in this environment.

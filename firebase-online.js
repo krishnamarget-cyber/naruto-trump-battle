@@ -1,144 +1,31 @@
-// Firebase friend-room connection for Naruto Trump Battle.
-// Uses the Firebase Web SDK directly; local/computer modes remain in app.js.
-import { initializeApp } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-app.js";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-auth.js";
-import { getDatabase, ref, set, get, onValue, update, serverTimestamp } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-database.js";
-
-const firebaseConfig = {
-  apiKey: "AIzaSyBegDbkC06g8FzT5lNbtSCxSYgZZb_18iY",
-  authDomain: "narutotrump-5181a.firebaseapp.com",
-  databaseURL: "https://narutotrump-5181a-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "narutotrump-5181a",
-  storageBucket: "narutotrump-5181a.firebasestorage.app",
-  messagingSenderId: "552251464572",
-  appId: "1:552251464572:web:c4d60a2a082ed81671a2f9"
-};
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const database = getDatabase(app);
-let currentRoom = "";
-let currentRole = "";
-let unsubscribeRoom = null;
-let currentRoomData = null;
-
-const $ = s => document.querySelector(s);
-const randomCode = () => {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const bytes = crypto.getRandomValues(new Uint8Array(6));
-  return Array.from(bytes, b => chars[b % chars.length]).join("");
-};
-async function ensureUser() {
-  if (auth.currentUser) return auth.currentUser;
-  const result = await signInAnonymously(auth);
-  return result.user;
-}
-function showError(message) {
-  const el = $("#online-error");
-  if (el) el.textContent = message;
-  else alert(message);
-}
-function stopRoomListener() {
-  if (unsubscribeRoom) unsubscribeRoom();
-  unsubscribeRoom = null;
-}
-function roomPage(message = "Connecting…") {
-  const appRoot = document.querySelector("#app");
-  appRoot.innerHTML = `<section class="page">
-    <div class="hero"><h2 class="gold">PRIVATE FRIEND ROOM</h2><p class="muted">Naruto Trump Battle • Online</p></div>
-    <div class="panel center">
-      <p class="muted">ROOM CODE</p><h1 class="gold" style="font-size:2.5rem;letter-spacing:.18em">${currentRoom}</h1>
-      <p id="online-room-status">${message}</p>
-      <p class="muted" id="online-player-count">Waiting for players…</p>
-      <button class="btn blue" id="copy-room-code">COPY ROOM CODE</button>
-    </div>
-    <div class="panel"><b>PLAYER 1</b><p id="online-p1">Connecting…</p><b>PLAYER 2</b><p id="online-p2">Waiting to join…</p></div>
-    <p id="online-error" class="status danger"></p>
-    <button class="btn" onclick="leaveOnlineRoom()">LEAVE ROOM</button>
-    <p class="muted center">Share this code only with your friend.</p>
-  </section>`;
-  $("#copy-room-code")?.addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText(currentRoom); $("#copy-room-code").textContent = "COPIED!"; }
-    catch { showError("Copy was blocked by the browser. Please copy the code manually."); }
-  });
-}
-function watchRoom(code) {
-  stopRoomListener();
-  const roomRef = ref(database, `rooms/${code}`);
-  unsubscribeRoom = onValue(roomRef, snap => {
-    if (!snap.exists()) { showError("This room no longer exists."); return; }
-    currentRoomData = snap.val();
-    const p1 = currentRoomData.players?.p1;
-    const p2 = currentRoomData.players?.p2;
-    const joined = Boolean(p1 && p2);
-    const status = $("#online-room-status");
-    const count = $("#online-player-count");
-    const p1el = $("#online-p1"), p2el = $("#online-p2");
-    if (status) status.textContent = joined ? "Both players connected. Room is ready." : "Waiting for your friend to join…";
-    if (count) count.textContent = joined ? "2 / 2 players connected" : "1 / 2 players connected";
-    if (p1el) p1el.textContent = p1 === auth.currentUser?.uid ? "You (Host) ✓" : "Host connected ✓";
-    if (p2el) p2el.textContent = p2 ? (p2 === auth.currentUser?.uid ? "You (Player 2) ✓" : "Friend connected ✓") : "Waiting to join…";
-  }, err => showError(err.message));
-}
-window.openOnlineMenu = () => {
-  document.querySelector("#app").innerHTML = `<section class="page">
-    <div class="hero"><h2 class="gold">PLAY WITH FRIENDS</h2><p class="muted">Create a private room or join your friend's room.</p></div>
-    <div class="panel"><h3 class="gold">CREATE ROOM</h3><p class="muted">Create a room and share its six-character code.</p><button class="btn primary" id="create-room">CREATE PRIVATE ROOM</button></div>
-    <div class="panel"><h3 class="gold">JOIN ROOM</h3><input id="join-room-code" maxlength="6" autocomplete="off" autocapitalize="characters" placeholder="ENTER 6-CHARACTER CODE" style="width:100%;padding:14px;border-radius:10px;background:#111827;color:white;border:1px solid #475569;margin:8px 0"><button class="btn blue" id="join-room">JOIN FRIEND'S ROOM</button></div>
-    <p id="online-error" class="status danger"></p><button class="btn" onclick="menu()">BACK</button>
-  </section>`;
-  $("#create-room").addEventListener("click", createRoom);
-  $("#join-room").addEventListener("click", () => joinRoom($("#join-room-code").value));
-};
-async function createRoom() {
-  const button = $("#create-room");
-  if (button) { button.disabled = true; button.textContent = "CREATING…"; }
-  try {
-    const user = await ensureUser();
-    let code, roomRef, created = false;
-    for (let attempt = 0; attempt < 5 && !created; attempt++) {
-      code = randomCode();
-      roomRef = ref(database, `rooms/${code}`);
-      try {
-        await set(roomRef, { players: { p1: user.uid, p2: null }, status: "waiting", createdAt: Date.now(), gameVersion: 4 });
-        created = true;
-      } catch (writeError) {
-        // A code collision is rejected by the database create-only rule; try another code.
-        if (attempt === 4) throw writeError;
-      }
-    }
-    if (!created) throw new Error("Couldn't reserve a room code. Please try again.");
-    currentRoom = code; currentRole = "host";
-    roomPage("Waiting for your friend to join…"); watchRoom(code);
-  } catch (err) { showError(err.message || "Could not create room."); if (button) { button.disabled = false; button.textContent = "CREATE PRIVATE ROOM"; } }
-}
-async function joinRoom(rawCode) {
-  const code = String(rawCode || "").trim().toUpperCase();
-  if (!/^[A-HJ-NP-Z2-9]{6}$/.test(code)) { showError("Enter a valid six-character room code."); return; }
-  const button = $("#join-room");
-  if (button) { button.disabled = true; button.textContent = "JOINING…"; }
-  try {
-    const user = await ensureUser();
-    const roomRef = ref(database, `rooms/${code}`);
-    // Join by claiming the empty P2 slot. Rules permit only the first authenticated claimant.
-    await set(ref(database, `rooms/${code}/players/p2`), user.uid);
-    currentRole = "guest";
-    currentRoom = code;
-    roomPage("Joining room…"); watchRoom(code);
-  } catch (err) { showError(err.message || "Could not join room."); if (button) { button.disabled = false; button.textContent = "JOIN FRIEND'S ROOM"; } }
-}
-window.leaveOnlineRoom = () => {
-  stopRoomListener();
-  currentRoom = ""; currentRole = ""; currentRoomData = null;
-  window.openOnlineMenu();
-};
-window.narutoOnline = {
-  get roomCode() { return currentRoom; },
-  get role() { return currentRole; },
-  get user() { return auth.currentUser; },
-  database,
-  auth
-};
-onAuthStateChanged(auth, user => {
-  // Sign-in is intentionally lazy; local play never requires network authentication.
-});
+// Naruto Trump Battle — friends-only online mode (Firebase Realtime Database)
+import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-app.js";
+import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-auth.js";
+import { getDatabase, ref, set, get, onValue, update, runTransaction } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-database.js";
+const firebaseConfig={apiKey:"AIzaSyBegDbkC06g8FzT5lNbtSCxSYgZZb_18iY",authDomain:"narutotrump-5181a.firebaseapp.com",databaseURL:"https://narutotrump-5181a-default-rtdb.asia-southeast1.firebasedatabase.app",projectId:"narutotrump-5181a",storageBucket:"narutotrump-5181a.firebasestorage.app",messagingSenderId:"552251464572",appId:"1:552251464572:web:c4d60a2a082ed81671a2f9"};
+const app=getApps().length?getApp():initializeApp(firebaseConfig),auth=getAuth(app),database=getDatabase(app);
+let room='',role='',uid='',stop=null,roomData=null,cards=[],resolving=false;const $=s=>document.querySelector(s);const styles={Taijutsu:['T_ATK','T_DEF'],Kunai:['K_ATK','K_DEF'],Special:['S_ATK','S_DEF'],Ninjutsu:['N_ATK','N_DEF'],Genjutsu:['G_ATK','G_DEF']};
+const shuffle=a=>{a=[...a];for(let i=a.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};const rref=(path='')=>ref(database,`rooms/${room}${path?'/'+path:''}`);const say=m=>{let e=$('#online-error');if(e)e.textContent=m;else alert(m)};const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function user(){if(!auth.currentUser)await signInAnonymously(auth);uid=auth.currentUser.uid;return uid}async function loadCards(){if(!cards.length)cards=await (await fetch('cards.json')).json();return cards}
+function shell(html){$('#app').innerHTML=`<section class="page">${html}</section>`;window.scrollTo(0,0)}
+function code(){const a='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';return Array.from(crypto.getRandomValues(new Uint8Array(6)),x=>a[x%a.length]).join('')}
+function watch(){if(stop)stop();stop=onValue(rref(),snap=>{roomData=snap.val();renderRoom();const g=roomData?.game;if(role==='p1'&&g?.phase==='battle'&&g.choices?.p1?.locked&&g.choices?.p2?.locked&&!resolving){resolving=true;resolveOnline(g).catch(e=>say(e.message)).finally(()=>{resolving=false})}},e=>say(e.message))}
+window.openOnlineMenu=()=>{shell(`<div class="hero"><h2 class="gold">PLAY WITH FRIENDS</h2><p class="muted">Private two-player Naruto battle</p></div><div class="panel"><button class="btn primary" id="mk">CREATE PRIVATE ROOM</button></div><div class="panel"><input id="joincode" maxlength="6" placeholder="ROOM CODE" style="width:100%;padding:14px"><button class="btn blue" id="jn">JOIN ROOM</button></div><p id="online-error" class="status danger"></p><button class="btn" onclick="menu()">BACK</button>`);$('#mk').onclick=create;$('#jn').onclick=()=>join($('#joincode').value)};
+async function create(){try{await user();let c=code();room=c;role='p1';await set(rref(),{players:{p1:uid,p2:null},status:'waiting',createdAt:Date.now(),version:5});watch()}catch(e){say(e.message)}}
+async function join(v){try{await user();let c=String(v||'').trim().toUpperCase();if(!/^[A-HJ-NP-Z2-9]{6}$/.test(c))throw Error('Enter the six-character room code.');room=c;let snap=await get(rref());if(!snap.exists())throw Error('Room not found.');if(snap.val().players?.p2)throw Error('Room is full.');await set(rref('players/p2'),uid);role='p2';watch()}catch(e){say(e.message)}}
+window.leaveOnlineRoom=()=>{if(stop)stop();room='';role='';roomData=null;window.openOnlineMenu()};
+function renderRoom(){if(!roomData)return;let p=roomData.players||{},both=!!(p.p1&&p.p2);if(roomData.status==='waiting'||!roomData.game){shell(`<div class="hero"><h2 class="gold">PRIVATE FRIEND ROOM</h2><p>ROOM CODE</p><h1 class="gold" style="letter-spacing:.2em">${room}</h1><p>${both?'2 / 2 PLAYERS CONNECTED':'Waiting for your friend…'}</p></div><div class="panel"><p>PLAYER 1: ${p.p1?'Connected ✓':'Waiting'}</p><p>PLAYER 2: ${p.p2?'Connected ✓':'Waiting'}</p>${both&&role==='p1'?'<button class="btn primary" id="begin">START ONLINE GAME</button>':''}</div><button class="btn" onclick="leaveOnlineRoom()">LEAVE ROOM</button><p id="online-error" class="status danger"></p>`);$('#begin')?.addEventListener('click',startGame);return}renderGame()}
+async function startGame(){try{await loadCards();let pool=shuffle(cards),rosters=[[],[]];for(let l=1;l<=6;l++){let n=l===5?2:l===6?1:3;let level=shuffle(pool.filter(c=>Number(c.level)===l));for(let i=0;i<n;i++){rosters[0].push(level.pop());rosters[1].push(level.pop())}}let g={phase:'teams',rosters:rosters.map(a=>a.map(c=>c.id)),roles:{p1:null,p2:null},teamReady:{p1:false,p2:false},level:1,round:0,hp:[7.5,7.5],shield:[0,0],temp:[0,0],used:[[],[]],choices:{p1:null,p2:null},history:[],finished:false};await update(rref(),{status:'playing',game:g})}catch(e){say(e.message)}}
+function card(id){return cards.find(c=>c.id===id)}function myKey(){return role==='p1'?'p1':'p2'}function myIndex(){return role==='p1'?0:1}function renderGame(){let g=roomData.game;if(!g)return;loadCards().then(()=>{if(!roomData?.game)return;g=roomData.game;let k=myKey(),i=myIndex(),other=k==='p1'?'p2':'p1';if(g.phase==='teams')teamUI(g,k,i,other);else if(g.phase==='battle')battleUI(g,k,i,other);else if(g.phase==='reveal')resultUI(g);else if(g.phase==='finished')resultUI(g,true)})}
+function cardTile(id,selected='',tag=''){let c=card(id);if(!c)return '';return `<article class="card"><img class="portrait" src="assets/portraits/${esc(id)}.png"><div><b class="cardname">${esc(c.name)}</b><div class="muted">${esc(c.id)} • LEVEL ${c.level}</div><div class="stats">T ${c.T_ATK}/${c.T_DEF} · K ${c.K_ATK}/${c.K_DEF} · S ${c.S_ATK}/${c.S_DEF} · N ${c.N_ATK}/${c.N_DEF} · G ${c.G_ATK}/${c.G_DEF}</div>${tag}</div></article>`}
+function teamUI(g,k,i,other){let ids=g.rosters[i],r=g.roles[k]||{},confirmed=g.teamReady[k];shell(`<h2 class="gold">YOUR TEAM • ${k.toUpperCase()}</h2><p class="muted">Choose a Captain and a different Vice Captain. Your choices are saved to this room.</p><div class="rolebar"><div class="rolepill">Captain: <b>${card(r.cap)?.name||'Not selected'}</b></div><div class="rolepill">Vice: <b>${card(r.vice)?.name||'Not selected'}</b></div></div>${ids.map(id=>{let c=card(id);return `<article class="card"><img class="portrait" src="assets/portraits/${id}.png"><div><b class="cardname">${esc(c.name)}</b><div class="muted">${id} • LEVEL ${c.level}</div><div class="rolebtns"><button class="btn ${r.cap===id?'blue':''}" ${confirmed?'disabled':''} onclick="onlineRole('cap','${id}')">${r.cap===id?'✓ CAPTAIN':'★ CAPTAIN'}</button><button class="btn ${r.vice===id?'green':''}" ${confirmed?'disabled':''} onclick="onlineRole('vice','${id}')">${r.vice===id?'✓ VICE':'☆ VICE'}</button></div></div></article>`}).join('')}<div class="panel"><p>${g.teamReady?.[other]?'Opponent team locked ✓':'Waiting for opponent team…'}</p>${confirmed?'<b class="gold">YOUR TEAM LOCKED</b>':'<button class="btn primary" onclick="onlineConfirmTeam()">CONFIRM MY TEAM</button>'}</div>`)}
+window.onlineRole=async(t,id)=>{let g=roomData.game,r={...(g.roles?.[myKey()]||{})};if(r[t==='cap'?'vice':'cap']===id)return say('Captain and Vice Captain must be different.');r[t]=id;await update(rref('game/roles'),{[myKey()]:r});};
+window.onlineConfirmTeam=async()=>{let g=roomData.game,r=g.roles?.[myKey()];if(!r?.cap||!r?.vice||r.cap===r.vice)return say('Choose two different cards for Captain and Vice Captain.');await update(rref('game/teamReady'),{[myKey()]:true});let snap=await get(rref('game'));let x=snap.val();if(x.teamReady.p1&&x.teamReady.p2)await update(rref('game'),{phase:'battle',status:'playing'})};
+function battleUI(g,k,i,other){let ids=g.rosters[i],available=ids.map(card).filter(c=>c.level===g.level&&!g.used[i].includes(c.id)),ch=g.choices?.[k]||{};shell(`<div class="hero"><h2 class="gold">ONLINE ARENA</h2><p>ROUND ${g.round+1} • LEVEL ${g.level}</p><p>HP ${g.hp[i]} • SHIELD ${g.shield[i]} • TEMP ${g.temp[i]}</p></div><h3 class="gold">CHOOSE YOUR FIGHTER</h3>${available.map(c=>`<article class="card"><img class="portrait" src="assets/portraits/${c.id}.png"><div><b>${esc(c.name)}</b><div class="muted">${c.id}</div><button class="btn ${ch.fighter===c.id?'blue':''}" onclick="onlinePick('fighter','${c.id}')">${ch.fighter===c.id?'✓ SELECTED':'SELECT FIGHTER'}</button></div></article>`).join('')}<div class="panel"><h3>ATTACK STYLE</h3><div class="stylegrid">${Object.keys(styles).map(s=>`<button class="btn ${ch.style===s?'blue':''}" onclick="onlinePick('style','${s}')">${s}</button>`).join('')}</div>${g.choices?.[other]?.locked?'<p class="gold">Opponent has locked in ✓</p>':'<p>Waiting for opponent selection…</p>'}${ch.locked?'<b class="gold">YOUR CHOICE LOCKED</b>':'<button class="btn primary" onclick="onlineLockChoice()">LOCK FIGHTER & ATTACK</button>'}</div>`)}
+window.onlinePick=async(t,v)=>{let ch={...(roomData.game.choices?.[myKey()]||{})};if(ch.locked)return;ch[t]=v;await update(rref('game/choices'),{[myKey()]:ch})};
+window.onlineLockChoice=async()=>{let g=roomData.game,ch=g.choices?.[myKey()]||{};if(!ch.fighter||!ch.style)return say('Select a fighter and attack style first.');ch.locked=true;await update(rref('game/choices'),{[myKey()]:ch})};
+function attack(a,d){return a-d>0.0001?{damage:+(a-d).toFixed(6),shield_gain:0}:{damage:0,shield_gain:+Math.max(d-a,0).toFixed(6)}}function apply(i,a,g){let hp=g.hp[i],sh=g.shield[i],tmp=g.temp[i],absorbed=Math.min(a.damage,tmp);tmp-=absorbed;let lost=Math.min(a.damage-absorbed,hp);hp-=lost;sh+=a.shield_gain;let acts=0,restored=0,gained=0;while(sh+0.0001>=3.75){sh=Math.max(0,sh-3.75);acts++;let r=Math.max(0,Math.min(1.125,7.5-hp));hp+=r;restored+=r;let potential=(1.125-r)*(.5/1.125),actual=Math.min(potential,.5-tmp);tmp+=actual;gained+=actual}g.hp[i]=+hp.toFixed(6);g.shield[i]=+sh.toFixed(6);g.temp[i]=+tmp.toFixed(6);return {damage_taken:a.damage,temp_absorbed:absorbed,hp_lost:lost,shield_gain:a.shield_gain,activations:acts,hp_restored:restored,temp_hp_gained:gained,hp:g.hp[i],shield:g.shield[i],temp_hp:g.temp[i]}}
+async function resolveOnline(g){let c1=card(g.choices.p1.fighter),c2=card(g.choices.p2.fighter),s1=g.choices.p1.style,s2=g.choices.p2.style,[a1,d1]=styles[s1],[a2,d2]=styles[s2],p1=attack(c1[a1],c2[d2]),p2=attack(c2[a2],c1[d1]),before={hp:[...g.hp],shield:[...g.shield],temp:[...g.temp]},r1=apply(0,p2,g),r2=apply(1,p1,g);g.used[0].push(c1.id);g.used[1].push(c2.id);g.round++;let report={round:g.round,level:g.level,c1,c2,s1,s2,p1,p2,r1,r2,before};g.history.push(report);if(g.hp[0]<=0||g.hp[1]<=0){g.finished=true;g.phase='finished'}else{while(g.level<=6&&[0,1].some(i=>!g.rosters[i].map(card).some(c=>c.level===g.level&&!g.used[i].includes(c.id)))){if(g.level===6){g.finished=true;g.phase='finished';break}g.level++}if(!g.finished){g.phase='reveal';g.choices={p1:null,p2:null}}}await set(rref('game'),g)}
+function resultUI(g,finished=false){let r=g.history[g.history.length-1];shell(`<div class="hero"><h2 class="gold">${finished?'MATCH COMPLETE':'ROUND '+g.round+' RESULT'}</h2>${r?`<p>${esc(r.c1.name)} (${r.s1}) VS ${esc(r.c2.name)} (${r.s2})</p>`:''}<p>PLAYER 1 • HP ${g.hp[0]} • SHIELD ${g.shield[0]} • TEMP ${g.temp[0]}</p><p>PLAYER 2 • HP ${g.hp[1]} • SHIELD ${g.shield[1]} • TEMP ${g.temp[1]}</p></div>${r?`<div class="resultrow"><div class="panel"><b>PLAYER 1 ATTACK</b><p>${r.p1.damage?`Damage ${r.p1.damage}`:`Shield +${r.p1.shield_gain}`}</p><p>HP lost ${r.r2.hp_lost}</p></div><div class="panel"><b>PLAYER 2 ATTACK</b><p>${r.p2.damage?`Damage ${r.p2.damage}`:`Shield +${r.p2.shield_gain}`}</p><p>HP lost ${r.r1.hp_lost}</p></div></div>`:''}<div class="panel"><b>${finished?'GAME OVER':'Both attacks resolved simultaneously.'}</b><p>Battle history: ${g.history.length} rounds</p></div>${!finished?'<button class="btn primary" onclick="onlineNextRound()">NEXT ROUND</button>':''}<button class="btn" onclick="leaveOnlineRoom()">LEAVE ROOM</button>`)}
+window.onlineNextRound=async()=>{let g=roomData.game;if(role!=='p1')return say('Host advances the next round.');g.phase='battle';await set(rref('game'),g)};
+window.narutoOnline={get roomCode(){return room},get role(){return role},get user(){return auth.currentUser},database,auth};

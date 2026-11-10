@@ -14,8 +14,33 @@ window.openOnlineMenu=()=>{shell(`<div class="hero"><h2 class="gold">PLAY WITH F
 async function create(){try{await user();let c=code();room=c;role='p1';await set(rref(),{players:{p1:uid,p2:null},status:'waiting',createdAt:Date.now(),version:5});watch()}catch(e){say(e.message)}}
 async function join(v){try{await user();let c=String(v||'').trim().toUpperCase();if(!/^[A-HJ-NP-Z2-9]{6}$/.test(c))throw Error('Enter the six-character room code.');room=c;let snap=await get(rref());if(!snap.exists())throw Error('Room not found.');if(snap.val().players?.p2)throw Error('Room is full.');await set(rref('players/p2'),uid);role='p2';watch()}catch(e){say(e.message)}}
 window.leaveOnlineRoom=()=>{if(stop)stop();room='';role='';roomData=null;window.openOnlineMenu()};
-function renderRoom(){if(!roomData)return;let p=roomData.players||{},both=!!(p.p1&&p.p2);if(roomData.status==='waiting'||!roomData.game){shell(`<div class="hero"><h2 class="gold">PRIVATE FRIEND ROOM</h2><p>ROOM CODE</p><h1 class="gold" style="letter-spacing:.2em">${room}</h1><p>${both?'2 / 2 PLAYERS CONNECTED':'Waiting for your friend…'}</p></div><div class="panel"><p>PLAYER 1: ${p.p1?'Connected ✓':'Waiting'}</p><p>PLAYER 2: ${p.p2?'Connected ✓':'Waiting'}</p>${both&&role==='p1'?'<button class="btn primary" id="begin">START ONLINE GAME</button>':''}</div><button class="btn" onclick="leaveOnlineRoom()">LEAVE ROOM</button><p id="online-error" class="status danger"></p>`);$('#begin')?.addEventListener('click',startGame);return}renderGame()}
-async function startGame(){try{await loadCards();let pool=shuffle(cards),rosters=[[],[]];for(let l=1;l<=6;l++){let n=l===5?2:l===6?1:3;let level=shuffle(pool.filter(c=>Number(c.level)===l));for(let i=0;i<n;i++){rosters[0].push(level.pop());rosters[1].push(level.pop())}}let g={phase:'teams',rosters:rosters.map(a=>a.map(c=>c.id)),roles:{p1:null,p2:null},teamReady:{p1:false,p2:false},level:1,round:0,hp:[7.5,7.5],shield:[0,0],temp:[0,0],used:[[],[]],choices:{p1:null,p2:null},history:[],finished:false};await update(rref(),{status:'playing',game:g})}catch(e){say(e.message)}}
+function renderRoom(){if(!roomData)return;let p=roomData.players||{},both=!!(p.p1&&p.p2);if(roomData.status==='waiting'||!roomData.game){shell(`<div class="hero"><h2 class="gold">PRIVATE FRIEND ROOM</h2><p>ROOM CODE</p><h1 class="gold" style="letter-spacing:.2em">${room}</h1><p>${both?'2 / 2 PLAYERS CONNECTED':'Waiting for your friend…'}</p></div><div class="panel"><p>PLAYER 1: ${p.p1?'Connected ✓':'Waiting'}</p><p>PLAYER 2: ${p.p2?'Connected ✓':'Waiting'}</p>${both&&role==='p1'?'<button class="btn primary" id="begin">START ONLINE GAME</button>':''}</div><button class="btn" onclick="leaveOnlineRoom()">LEAVE ROOM</button><p id="online-error" class="status danger"></p>`);if($('#begin'))$('#begin').onclick=()=>window.startOnlineGame();return}renderGame()}
+async function startGame(){
+  const button=$('#begin');
+  try{
+    if(role!=='p1') throw new Error('Only the room creator can start the match.');
+    if(!roomData?.players?.p1 || !roomData?.players?.p2) throw new Error('Both players must be connected before starting.');
+    if(button){button.disabled=true;button.textContent='STARTING…';}
+    say('Preparing the 30-card teams…');
+    await loadCards();
+    if(cards.length!==120) throw new Error(`Card database error: expected 120 cards, found ${cards.length}.`);
+    let pool=shuffle(cards),rosters=[[],[]];
+    for(let l=1;l<=6;l++){
+      let n=l===5?2:l===6?1:3;
+      let level=shuffle(pool.filter(c=>Number(c.level)===l));
+      if(level.length<n*2) throw new Error(`Not enough cards in Level ${l}.`);
+      for(let i=0;i<n;i++){rosters[0].push(level.pop());rosters[1].push(level.pop());}
+    }
+    const g={phase:'teams',rosters:rosters.map(a=>a.map(c=>c.id)),roles:{p1:null,p2:null},teamReady:{p1:false,p2:false},level:1,round:0,hp:[7.5,7.5],shield:[0,0],temp:[0,0],used:[[],[]],choices:{p1:null,p2:null},history:[],finished:false};
+    say('Teams created. Opening team selection…');
+    await update(rref(),{status:'playing',game:g});
+  }catch(e){
+    console.error('Online game start failed:',e);
+    say(`START FAILED: ${e?.message||e}`);
+    const b=$('#begin');if(b){b.disabled=false;b.textContent='TRY START AGAIN';}
+  }
+}
+window.startOnlineGame=startGame;
 function card(id){return cards.find(c=>c.id===id)}function myKey(){return role==='p1'?'p1':'p2'}function myIndex(){return role==='p1'?0:1}function renderGame(){let g=roomData.game;if(!g)return;loadCards().then(()=>{if(!roomData?.game)return;g=roomData.game;let k=myKey(),i=myIndex(),other=k==='p1'?'p2':'p1';if(g.phase==='teams')teamUI(g,k,i,other);else if(g.phase==='battle')battleUI(g,k,i,other);else if(g.phase==='reveal')resultUI(g);else if(g.phase==='finished')resultUI(g,true)})}
 function cardTile(id,selected='',tag=''){let c=card(id);if(!c)return '';return `<article class="card"><img class="portrait" src="assets/portraits/${esc(id)}.png"><div><b class="cardname">${esc(c.name)}</b><div class="muted">${esc(c.id)} • LEVEL ${c.level}</div><div class="stats">T ${c.T_ATK}/${c.T_DEF} · K ${c.K_ATK}/${c.K_DEF} · S ${c.S_ATK}/${c.S_DEF} · N ${c.N_ATK}/${c.N_DEF} · G ${c.G_ATK}/${c.G_DEF}</div>${tag}</div></article>`}
 function teamUI(g,k,i,other){let ids=g.rosters[i],r=g.roles[k]||{},confirmed=g.teamReady[k];shell(`<h2 class="gold">YOUR TEAM • ${k.toUpperCase()}</h2><p class="muted">Choose a Captain and a different Vice Captain. Your choices are saved to this room.</p><div class="rolebar"><div class="rolepill">Captain: <b>${card(r.cap)?.name||'Not selected'}</b></div><div class="rolepill">Vice: <b>${card(r.vice)?.name||'Not selected'}</b></div></div>${ids.map(id=>{let c=card(id);return `<article class="card"><img class="portrait" src="assets/portraits/${id}.png"><div><b class="cardname">${esc(c.name)}</b><div class="muted">${id} • LEVEL ${c.level}</div><div class="rolebtns"><button class="btn ${r.cap===id?'blue':''}" ${confirmed?'disabled':''} onclick="onlineRole('cap','${id}')">${r.cap===id?'✓ CAPTAIN':'★ CAPTAIN'}</button><button class="btn ${r.vice===id?'green':''}" ${confirmed?'disabled':''} onclick="onlineRole('vice','${id}')">${r.vice===id?'✓ VICE':'☆ VICE'}</button></div></div></article>`}).join('')}<div class="panel"><p>${g.teamReady?.[other]?'Opponent team locked ✓':'Waiting for opponent team…'}</p>${confirmed?'<b class="gold">YOUR TEAM LOCKED</b>':'<button class="btn primary" onclick="onlineConfirmTeam()">CONFIRM MY TEAM</button>'}</div>`)}

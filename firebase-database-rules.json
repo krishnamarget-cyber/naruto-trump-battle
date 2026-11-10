@@ -1,0 +1,15 @@
+{
+  "rules": {
+    "rooms": {
+      "$room": {
+        ".read": "auth != null && (data.child('players/p1').val() === auth.uid || data.child('players/p2').val() === auth.uid)",
+        ".write": "auth != null && ((!data.exists() && newData.child('players/p1').val() === auth.uid && newData.child('players/p2').val() === null) || data.child('players/p1').val() === auth.uid || data.child('players/p2').val() === auth.uid)",
+        "players": {
+          "p2": {
+            ".write": "auth != null && !data.exists() && newData.val() === auth.uid && root.child('rooms').child($room).child('players/p1').exists() && root.child('rooms').child($room).child('players/p2').val() === null"
+          }
+        }
+      }
+    }
+  }
+}

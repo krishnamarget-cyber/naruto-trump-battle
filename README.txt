@@ -56,3 +56,12 @@ ONLINE INTEGRATION BUILD (2026-11-11)
 - Includes team role selection, level-based fighter selection, attack-style selection, simultaneous damage calculation, HP/shield/temp HP, level progression, and round result sync.
 - Firebase rules currently allow room participants to read the shared room. This build stores game selections in the shared room, so choices are not cryptographically/private-path protected. Use only with trusted friends.
 - Static validation is not a substitute for a live two-device Firebase test. The Firebase project must have Anonymous Authentication enabled and compatible Realtime Database rules published.
+
+
+ONLINE START HANDOFF FIX
+- The host now reads back the committed room/game state after starting and explicitly renders the team-selection screen.
+- The realtime database listener remains active for Player 2 and subsequent synchronization.
+- This is a code-level handoff fix; it does not bypass Firebase Authentication configuration errors.
+- If Firebase reports auth/api-key-not-valid, verify the Web API key in Firebase Project Settings, that the key is enabled, and that API restrictions allow Identity Toolkit API. Also confirm Anonymous Authentication is enabled.
+- Deploy all files from this folder together to the GitHub Pages repository root. Keep assets/portraits intact.
+- Testing status: static JavaScript syntax and archive integrity only; no live two-phone Firebase test has been performed.

@@ -1,0 +1,125 @@
+NARUTO TRUMP BATTLE — MATCH PRESETS & TEAM SELECTION SPEC
+===========================================================
+
+SOURCE DATABASE
+- 120 unique character cards.
+- Six tiers: Level 1, Level 2, Level 3, Level 4, Level 5, Special.
+- 20 source cards in each tier.
+
+MATCH PRESETS (CARDS PER PLAYER)
+--------------------------------
+QUICK MATCH — 10 cards
+- Level 1: 2
+- Level 2: 2
+- Level 3: 2
+- Level 4: 2
+- Level 5: 1
+- Special: 1
+
+STANDARD MATCH — 15 cards
+- Level 1: 3
+- Level 2: 3
+- Level 3: 3
+- Level 4: 3
+- Level 5: 2
+- Special: 1
+
+CANDIDATE POOL SIZE
+-------------------
+- Each tier independently gets either 15 or 16 cards, chosen randomly.
+- Pool construction happens independently for each of the six tiers.
+- The match draws twice the preset quantity from each tier.
+- Drawn cards are shuffled and split evenly between Player 1 and Player 2.
+- No card ID can appear on both teams.
+- Each team receives exactly the preset distribution.
+
+ATTACK STYLE STAT KEYS
+----------------------
+- Taijutsu: T_ATK
+- Kunai: K_ATK
+- Special: S_ATK
+- Ninjutsu: N_ATK
+- Genjutsu: G_ATK
+
+SELECTION MODES
+---------------
+BALANCED META
+- Uses all five attack styles.
+- For each style, inspect up to the first five cards in descending ATK order.
+- Select two distinct cards per style as Phase 1 anchors.
+- Repeated cards are placed into the Hold list; continue down the top-five window
+  until two distinct anchors are found or the window is exhausted.
+
+DYNAMIC META
+- Randomly selects three of the five attack styles per tier.
+- For each selected style, inspect up to the first five cards in descending ATK order.
+- Select two distinct cards per style; repeated candidates are held.
+
+WEAKEST META
+- Mirrors Dynamic Meta.
+- Randomly selects three attack styles per tier.
+- Uses ascending ATK order to select the weakest two distinct candidates per style.
+
+RANDOM
+- Randomly selects 15 or 16 cards from the 20-card tier.
+- No stat-based ranking is applied to candidate-pool construction.
+
+FIVE PHASES FOR META MODES
+--------------------------
+PHASE 1 — STYLE ANCHORS
+- Search up to position five in each selected attack-style ranking.
+- Add distinct anchors to Selected.
+- Place duplicates and reserve candidates into Hold.
+
+PHASE 2 — HOLDS & PROMOTIONS
+- Promote eligible Hold candidates.
+- Fill from the Container using the mode's direction (strongest for Balanced/
+  Dynamic, weakest for Weakest Meta).
+- Priority is Selected > Hold > Container.
+- No duplicate card IDs.
+
+PHASE 3 — ATTACK DENSITY
+- For each tier, compare each card's five attack stats with the corresponding
+  tier-wide style averages.
+- High density: at least four attack stats at or above their style average.
+- Medium density: two or three.
+- Low density: zero or one.
+- Balanced/Dynamic promote High, then Medium, then Low.
+- Weakest Meta promotes Low, then Medium, then High.
+- Continue until the pool has at least 13 cards or no candidates remain.
+
+PHASE 4 — FINAL BONUS
+- Fill remaining positions using a composite ranking based on:
+  55% mean attack stat, 25% minimum attack-stat floor, 12% attack density,
+  and 8% aggregate position across the five style rankings.
+- Dynamic/Balanced favor stronger composite candidates.
+- Weakest Meta mirrors the direction and favors weaker composite candidates.
+
+PHASE 5 — VALIDATION
+- Remove duplicates.
+- Fill any missing slots from remaining eligible candidates.
+- Ensure exact 15- or 16-card pool size.
+- Shuffle the candidate pool before the final match draw.
+
+FINAL TEAM ALLOCATION
+---------------------
+- For each tier, randomly draw 2 × the per-player preset count from its pool.
+- Shuffle that draw and split it equally between the two teams.
+- Verify no duplicated IDs and exact per-tier counts before proceeding to Captain
+  and Vice-Captain selection.
+
+SCOPE / PRESERVATION
+--------------------
+- This update changes match setup and roster generation only.
+- It does not modify attack resolution, Captain/Vice-Captain bonuses, HP, shield,
+  temporary HP, animation timing, or battle history.
+- Selection audit is available during team selection.
+
+
+CURRENT BATTLE SETTINGS (updated 2026-11-17)
+- Starting and maximum team HP: 10.00.
+- Shield accumulates from successful blocks and is never consumed automatically.
+- During their own battle turn, a player may manually spend 2.00 shield to recover up to 1.125 HP (capped at 10.00) and temporary HP according to the existing recovery formula (maximum 0.50).
+- Captain: multiply successful attack damage and successful block shield gain by 1.8×. An exact tie counts as a block and uses a 1.00 base shield gain before the multiplier.
+- Vice Captain: multiply successful attack damage and successful block shield gain by 1.4×. An exact tie counts as a block and uses a 1.00 base shield gain before the multiplier.
+- These role multipliers apply symmetrically to both players. Exact ties continue to count as successful blocks.

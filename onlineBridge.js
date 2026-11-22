@@ -1,4 +1,4 @@
-// onlineBridge.js — Room-code online multiplayer bridge using N13's RoomMultiplayerClient (Firebase RTDB + sid + onDisconnect)
+// onlineBridge.js — Room-code online multiplayer bridge for Naruto Trump Battle (120 cards)
 import { RoomMultiplayerClient } from "./roomClientAuto.js";
 
 const room = new RoomMultiplayerClient();
@@ -10,11 +10,21 @@ let myMoveLocked = false;
 function setLobbyMsg(text) {
   const el = document.getElementById("ntbOnlineMsg");
   if (el) el.textContent = text;
+  const inlineStatus = document.getElementById("ntbInlineOnlineBanner");
+  if (inlineStatus) inlineStatus.textContent = text;
 }
 
 function setBadge(text) {
   const el = document.getElementById("ntbRoomBadge");
   if (el) el.textContent = text;
+}
+
+function renderInlineOnlineBanner() {
+  if (!onlineEnabled) return "";
+  const code = room.roomCode || "";
+  const roleTxt = onlineRole || "PEER";
+  const statusTxt = document.getElementById("ntbOnlineMsg")?.textContent || `Online Room ${code} (${roleTxt})`;
+  return `<div id="ntbInlineOnlineBanner" class="panel" style="border-color:#2563eb;background:#10223d;font-size:12px;color:#dbeafe;margin-bottom:10px;">🌐 ONLINE ROOM <b>${code}</b> (${roleTxt}) · ${statusTxt}</div>`;
 }
 
 function serializeGameState() {
@@ -68,6 +78,7 @@ function ensureRoomPanel() {
       const code = await room.createRoom(document.getElementById("ntbRoomInput").value.trim().toUpperCase() || null);
       onlineEnabled = true;
       onlineRole = room.role || "HOST";
+      if (window.G) window.G.mode = "online";
       document.getElementById("ntbRoomInput").value = code;
       setBadge(`HOST · ${code}`);
       setLobbyMsg(`Room ${code} created! Share code with Player 2, then pick a match mode.`);
@@ -78,6 +89,7 @@ function ensureRoomPanel() {
             window.G = {
               ...window.G,
               ...saved,
+              mode: "online",
               used: [new Set(saved.used?.[0] || []), new Set(saved.used?.[1] || [])],
               history: window.G?.history || [],
             };
@@ -99,6 +111,7 @@ function ensureRoomPanel() {
       await room.joinRoom(code);
       onlineEnabled = true;
       onlineRole = room.role || "GUEST";
+      if (window.G) window.G.mode = "online";
       setBadge(`GUEST · ${code}`);
       setLobbyMsg(`Joined room ${code}! Waiting for Host to draft & sync teams...`);
       room.send({ type: "NTB_GUEST_READY" });
@@ -173,13 +186,16 @@ room.on("message", (msg) => {
     window.G.finished = false;
     window.G.reason = "";
     window.G.currentPlayer = 2;
+    setLobbyMsg("Host synced rosters! Pick your Captain & Vice Captain, then confirm.");
     if (typeof window.teamScreen === "function") window.teamScreen();
   } else if (msg.type === "NTB_START_BATTLE" && onlineRole === "GUEST") {
+    window.G.mode = "online";
     window.G.captain = msg.captain;
     window.G.vice = msg.vice;
     window.G.confirmed = [true, true];
     window.G.currentPlayer = 2;
     myMoveLocked = false;
+    setLobbyMsg("Both teams confirmed! Pick your fighter and attack style for Round 1.");
     if (typeof window.battleScreen === "function") window.battleScreen(2, true);
   } else if (msg.type === "NTB_GUEST_MOVE" && onlineRole === "HOST") {
     pendingGuestMove = msg.move;
@@ -189,6 +205,8 @@ room.on("message", (msg) => {
       pendingGuestMove = null;
       myMoveLocked = false;
       window.resolveRound();
+    } else {
+      setLobbyMsg("Player 2 locked their move! Lock your move to resolve the round.");
     }
   } else if (msg.type === "NTB_ROUND_SYNC" && onlineRole === "GUEST") {
     window.G.hp = [...msg.hp];
@@ -200,6 +218,7 @@ room.on("message", (msg) => {
     window.G.reason = msg.reason || "";
     window.G.used = [new Set(msg.used?.[0] || []), new Set(msg.used?.[1] || [])];
     myMoveLocked = false;
+    setLobbyMsg(`Round ${msg.round} resolved! HP: P1 ${msg.hp[0].toFixed(2)} / P2 ${msg.hp[1].toFixed(2)}.`);
     if (window.G.finished && typeof window.endScreen === "function") {
       window.endScreen();
     } else if (typeof window.battleScreen === "function") {
@@ -210,6 +229,34 @@ room.on("message", (msg) => {
 
 function hookGameFunctions() {
   ensureRoomPanel();
+
+  if (typeof window.teamScreen === "function" && !window.teamScreen._ntbBannerHooked) {
+    const origTeam = window.teamScreen;
+    const wrappedTeam = function () {
+      const r = origTeam.apply(this, arguments);
+      const appEl = document.getElementById("app");
+      if (onlineEnabled && appEl && !document.getElementById("ntbInlineOnlineBanner")) {
+        appEl.insertAdjacentHTML("afterbegin", renderInlineOnlineBanner());
+      }
+      return r;
+    };
+    wrappedTeam._ntbBannerHooked = true;
+    window.teamScreen = wrappedTeam;
+  }
+
+  if (typeof window.battleScreen === "function" && !window.battleScreen._ntbBannerHooked) {
+    const origBattle = window.battleScreen;
+    const wrappedBattle = function () {
+      const r = origBattle.apply(this, arguments);
+      const appEl = document.getElementById("app");
+      if (onlineEnabled && appEl && !document.getElementById("ntbInlineOnlineBanner")) {
+        appEl.insertAdjacentHTML("afterbegin", renderInlineOnlineBanner());
+      }
+      return r;
+    };
+    wrappedBattle._ntbBannerHooked = true;
+    window.battleScreen = wrappedBattle;
+  }
 
   if (typeof window.confirmTeam === "function" && !window.confirmTeam._ntbHooked) {
     const origConfirmTeam = window.confirmTeam;
@@ -223,6 +270,7 @@ function hookGameFunctions() {
       }
       if (window.G.captain[i] === window.G.vice[i]) return;
       window.G.confirmed[i] = true;
+      window.G.mode = "online";
 
       if (onlineRole === "HOST") {
         room.send({
@@ -240,9 +288,11 @@ function hookGameFunctions() {
         });
         if (typeof room.saveState === "function") room.saveState(serializeGameState());
         setLobbyMsg("Team synced to Player 2! Waiting for Player 2 to confirm leaders...");
+        if (typeof window.battleScreen === "function") window.battleScreen(1, true);
       } else {
         room.send({ type: "NTB_START_BATTLE", captain: window.G.captain, vice: window.G.vice });
         window.G.currentPlayer = 2;
+        setLobbyMsg("Leaders locked! Entering battle screen...");
         if (typeof window.battleScreen === "function") window.battleScreen(2, true);
       }
     };
@@ -270,10 +320,14 @@ function hookGameFunctions() {
           window.resolveRound();
         } else {
           setLobbyMsg("Move locked! Waiting for Player 2's move...");
+          const m = document.getElementById("msg");
+          if (m) m.textContent = "Move locked! Waiting for Player 2's move...";
         }
       } else {
         room.send({ type: "NTB_GUEST_MOVE", move: { pick: window.G.pick[1], style: window.G.style[1] } });
         setLobbyMsg("Move sent to Host! Waiting for round resolution...");
+        const m = document.getElementById("msg");
+        if (m) m.textContent = "Move sent to Host! Waiting for round resolution...";
       }
     };
     wrappedLock._ntbHooked = true;

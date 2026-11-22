@@ -32,6 +32,74 @@ let lastClashRecord = null;
 let animTimers = [];
 let sfxEnabled = true;
 
+
+let intenseMode = "default"; // "default" | "intense"
+
+function isIntenseMode() {
+  return (matchState?.intenseMode || intenseMode) === "intense";
+}
+
+function getPlayerUsedStyles(player) {
+  return Array.isArray(player?.usedStyles) ? player.usedStyles : [];
+}
+
+function getIntenseFiveRoundProgress(player) {
+  const used = getPlayerUsedStyles(player);
+  const blockLen = 5;
+  const startIdx = Math.floor(used.length / blockLen) * blockLen;
+  const currentBlock = used.slice(startIdx);
+  const distinctInBlock = [...new Set(currentBlock)];
+  const remainingInBlock = blockLen - currentBlock.length;
+  const neededForThree = Math.max(0, 3 - distinctInBlock.length);
+  const mustPickNewInBlock = remainingInBlock <= neededForThree && neededForThree > 0;
+  return {
+    blockNumber: Math.floor(used.length / blockLen) + 1,
+    blockStartRound: startIdx + 1,
+    blockEndRound: startIdx + blockLen,
+    distinctInBlock,
+    distinctCount: distinctInBlock.length,
+    remainingInBlock,
+    mustPickNewInBlock,
+  };
+}
+
+function getIntenseMatchStyleProgress(player) {
+  const used = getPlayerUsedStyles(player);
+  const distinctMatchStyles = [...new Set(used)];
+  const totalCards = player?.roster?.length || 15;
+  const remainingCards = Math.max(0, totalCards - (player?.usedCardIds?.length || 0));
+  const neededForFour = Math.max(0, 4 - distinctMatchStyles.length);
+  const mustPickNewForMatch = remainingCards <= neededForFour && neededForFour > 0;
+  return {
+    distinctMatchStyles,
+    distinctCount: distinctMatchStyles.length,
+    remainingCards,
+    mustPickNewForMatch,
+  };
+}
+
+function isStyleAllowedInIntense(player, styleName) {
+  if (!isIntenseMode()) return { allowed: true, reason: "" };
+  const r5 = getIntenseFiveRoundProgress(player);
+  const mProg = getIntenseMatchStyleProgress(player);
+  const isNewInBlock = !r5.distinctInBlock.includes(styleName);
+  const isNewInMatch = !mProg.distinctMatchStyles.includes(styleName);
+
+  if (r5.mustPickNewInBlock && !isNewInBlock) {
+    return {
+      allowed: false,
+      reason: `Intense 5-round rule: must explore at least 3 distinct styles by Round ${r5.blockEndRound} (${r5.distinctCount}/3 so far).`,
+    };
+  }
+  if (mProg.mustPickNewForMatch && !isNewInMatch) {
+    return {
+      allowed: false,
+      reason: `Intense match rule: must explore at least 4 distinct styles across the full match (${mProg.distinctCount}/4 so far).`,
+    };
+  }
+  return { allowed: true, reason: "" };
+}
+
 // Play mode: "local" | "online" | "computer"
 let playMode = "local";
 const roomClient = new RoomMultiplayerClient();
@@ -144,7 +212,7 @@ function renderPresetSummary() {
     <strong>${p.label}:</strong> ${p.perPlayer} cards/team
     (${LEVELS.map((l) => `${levelName(l)}: ${p.distribution[l]}`).join(", ")}) ·
     <strong>Team HP:</strong> 10.00 HP ·
-    <strong>Manual Shield (at 2.00):</strong> Restore up to +1.125 HP &amp; +0.50 Temp HP ·
+    <strong>Manual Shield (at 2.00):</strong> Gain +20% HP (+2.00 HP) ·
     <strong>Captain / Vice:</strong> 1.8× / 1.4× ATK &amp; Block Shield
   `;
 }
@@ -571,9 +639,11 @@ roomClient.on("message", (msg) => {
     $("roomLobbyInfo").innerHTML =
       `Connected to Host <strong>${msg.hostName || "Player 1"}</strong>! Waiting for draft...`;
   } else if (msg.type === "TEAM_DRAFT_SYNC" && roomClient.role === "GUEST") {
+    intenseMode = msg.intenseMode || "default";
     draftedTeams = {
       presetKey: msg.presetKey,
       mode: msg.mode,
+      intenseMode,
       nameA: msg.nameA,
       nameB: msg.nameB,
       cardsA: msg.cardsA,
@@ -651,9 +721,10 @@ roomClient.on("message", (msg) => {
 // ============================================================================
 // MATCH ENGINE (Preserves exact 120-card rules: 10 HP, 2.00 Shield, 1.8x/1.4x)
 // ============================================================================
-function createNewMatchState({ presetKey, teamA, teamB }) {
+function createNewMatchState({ presetKey, intenseMode: modeFlag = "default", teamA, teamB }) {
   return {
     presetKey,
+    intenseMode: modeFlag,
     round: 0,
     level: 1,
     status: "IN_PROGRESS",
@@ -666,6 +737,7 @@ function createNewMatchState({ presetKey, teamA, teamB }) {
         roster: teamA.cards,
         captainId: teamA.captainId,
         viceCaptainId: teamA.viceCaptainId,
+        usedStyles: [],
         hp: 10,
         maxHp: 10,
         shields: 0,
@@ -677,6 +749,7 @@ function createNewMatchState({ presetKey, teamA, teamB }) {
         roster: teamB.cards,
         captainId: teamB.captainId,
         viceCaptainId: teamB.viceCaptainId,
+        usedStyles: [],
         hp: 10,
         maxHp: 10,
         shields: 0,
@@ -761,6 +834,8 @@ function executeTurnClash(state, { moveA, moveB }) {
 
   pA.usedCardIds.push(cA.id);
   pB.usedCardIds.push(cB.id);
+  pA.usedStyles = [...(pA.usedStyles || []), moveA.style];
+  pB.usedStyles = [...(pB.usedStyles || []), moveB.style];
   state.round += 1;
 
   const playedLevel = state.level;
@@ -832,9 +907,11 @@ function startDraft() {
   }
 
   const { cardsA, cardsB, audit } = generateTeamsForMatch(presetKey, mode);
+  intenseMode = $("intenseModeSelect")?.value || "default";
   draftedTeams = {
     presetKey,
     mode,
+    intenseMode,
     nameA: $("playerAName").value.trim() || "Player 1",
     nameB: isComputer() ? "Computer" : $("playerBName").value.trim() || "Player 2",
     cardsA,
@@ -852,6 +929,7 @@ function startDraft() {
       type: "TEAM_DRAFT_SYNC",
       presetKey,
       mode,
+      intenseMode,
       nameA: draftedTeams.nameA,
       nameB: draftedTeams.nameB,
       cardsA: draftedTeams.cardsA,
@@ -977,11 +1055,7 @@ function startOnlineMatchAsHost() {
     viceCaptainId: tempVcB,
   };
 
-  matchState = createNewMatchState({
-    presetKey: draftedTeams.presetKey,
-    teamA: teamADef,
-    teamB: teamBDef,
-  });
+  matchState = createNewMatchState({ presetKey: draftedTeams.presetKey, intenseMode: draftedTeams.intenseMode || intenseMode, teamA: teamADef, teamB: teamBDef });
 
   roomClient.send({
     type: "START_ONLINE_MATCH",
@@ -1136,6 +1210,7 @@ function updateHud() {
     const remaining = p.roster.length - p.usedCardIds.length;
     $(`hudCardsLeft${side}`).textContent = `Cards Left: ${remaining} / ${p.roster.length}`;
   });
+  renderMyRosterStatus();
 }
 
 function handleActivateShield(side) {
@@ -1144,10 +1219,11 @@ function handleActivateShield(side) {
   if (p.shields + 0.000001 < 2.0) return;
 
   p.shields = +(p.shields - 2.0).toFixed(6);
-  const restored = Math.max(0, Math.min(1.125, p.maxHp - p.hp));
+  const hpGainAmount = +(p.maxHp * 0.2).toFixed(6); // 20% of maxHp (2.00 HP on 10.00 maxHp)
+  const restored = Math.max(0, Math.min(hpGainAmount, p.maxHp - p.hp));
   p.hp = +(p.hp + restored).toFixed(6);
-  const potential = (1.125 - restored) * (0.5 / 1.125);
-  const gained = Math.min(potential, 0.5 - p.extraArmorHp);
+  const overflow = +(hpGainAmount - restored).toFixed(6);
+  const gained = overflow > 0 ? Math.min(overflow, 0.5 - p.extraArmorHp) : 0;
   p.extraArmorHp = +(p.extraArmorHp + gained).toFixed(6);
 
   const ev = {
@@ -1168,7 +1244,11 @@ function handleActivateShield(side) {
   }
   updateHud();
   renderHistoryLog();
-  alert(`${p.name} spent 2.00 Shield: +${fmt(restored)} HP, +${fmt(gained)} Temp HP!`);
+  alert(
+    gained > 0.0001
+      ? `${p.name} spent 2.00 Shield: +${fmt(restored)} HP (20% cap) & +${fmt(gained)} Temp HP!`
+      : `${p.name} spent 2.00 Shield: +${fmt(restored)} HP (+20% HP)!`
+  );
 }
 
 function prepareOnlineTurnUi() {
@@ -1219,9 +1299,15 @@ function prepareTurnCurtain() {
 
 function refreshMoveSelectorLabels(card) {
   const lvl = card ? Number(card.level) : null;
+  const activePlayer = matchState ? matchState.players[mySide()] : null;
+  let firstEnabledStyle = null;
   $("styleBtnGroup").querySelectorAll("button").forEach((btn) => {
     const st = btn.dataset.style;
     const meta = STYLES[st];
+    const chk = activePlayer ? isStyleAllowedInIntense(activePlayer, st) : { allowed: true, reason: "" };
+    btn.disabled = !chk.allowed;
+    btn.title = chk.reason || "";
+    if (chk.allowed && !firstEnabledStyle) firstEnabledStyle = st;
     if (!card) {
       btn.innerHTML = `<span>${st} (${meta.short})</span>`;
       return;
@@ -1230,6 +1316,15 @@ function refreshMoveSelectorLabels(card) {
     const defHtml = formatStatSignal(card[meta.def], lvl, meta.def);
     btn.innerHTML = `<span>${st} (${meta.short})</span><span class="btn-stat-sub">ATK ${atkHtml} · DEF ${defHtml}</span>`;
   });
+  if (activePlayer && isIntenseMode()) {
+    const curChk = isStyleAllowedInIntense(activePlayer, selectedStyle);
+    if (!curChk.allowed && firstEnabledStyle) {
+      selectedStyle = firstEnabledStyle;
+      $("styleBtnGroup").querySelectorAll("button").forEach((b) => {
+        b.classList.toggle("active", b.dataset.style === selectedStyle);
+      });
+    }
+  }
 }
 
 function updateSelectedPreviewBar(player) {
@@ -1272,7 +1367,13 @@ function revealActiveHand() {
   $("btnLockMove").disabled = true;
   $("btnLockMove").textContent = "Select a Card Above to Lock Move";
 
-  $("activeTierPrompt").textContent = `${player.name} — Tap 1 available ${levelName(lvl)} fighter:`;
+  if (isIntenseMode()) {
+    const r5 = getIntenseFiveRoundProgress(player);
+    const mp = getIntenseMatchStyleProgress(player);
+    $("activeTierPrompt").textContent = `${player.name} — Tap 1 ${levelName(lvl)} fighter · Intense: ${r5.distinctCount}/3 styles in ${r5.blockStartRound}–${r5.blockEndRound} rounds, ${mp.distinctCount}/4 styles in match`;
+  } else {
+    $("activeTierPrompt").textContent = `${player.name} — Tap 1 available ${levelName(lvl)} fighter:`;
+  }
 
   const tierCards = player.roster.filter((c) => Number(c.level) === lvl);
   $("handGrid").innerHTML = tierCards
@@ -1606,6 +1707,62 @@ function advanceTurn() {
   prepareTurnCurtain();
 }
 
+
+function renderMyRosterStatus() {
+  const container = $("myRosterStatusBody");
+  const pill = $("rosterSummaryPill");
+  if (!container || !pill || !matchState) return;
+
+  const side = mySide();
+  const player = matchState.players[side];
+  if (!player) return;
+
+  const usedSet = new Set(player.usedCardIds || []);
+  const playedCards = player.roster.filter((c) => usedSet.has(c.id));
+  const unplayedCards = player.roster.filter((c) => !usedSet.has(c.id));
+
+  pill.textContent = `${playedCards.length} Played · ${unplayedCards.length} Not Played`;
+
+  const renderStatusCard = (c, played) => {
+    const isCap = c.id === player.captainId;
+    const isVc = c.id === player.viceCaptainId;
+    const roleTag = isCap
+      ? '<span class="badge badge-cap">CAP 1.8×</span>'
+      : isVc
+      ? '<span class="badge badge-vc">VC 1.4×</span>'
+      : "";
+    const stateTag = played
+      ? '<span class="badge badge-used">PLAYED</span>'
+      : '<span class="badge badge-vc" style="background:#065f46;color:#a7f3d0;">NOT PLAYED</span>';
+    return renderCardMarkup(c, {
+      badgeHtml: roleTag + stateTag,
+      extraClass: played ? "used" : isCap ? "cap-card" : isVc ? "vc-card" : "",
+    });
+  };
+
+  container.innerHTML = `
+    <div class="muted" style="margin-bottom:8px;">
+      Showing <strong>${player.name}</strong>'s full ${player.roster.length}-card roster.
+    </div>
+    <h3 class="ok" style="margin:6px 0;">Not Played Yet (${unplayedCards.length})</h3>
+    <div class="card-grid">
+      ${
+        unplayedCards.length
+          ? unplayedCards.map((c) => renderStatusCard(c, false)).join("")
+          : '<div class="muted">All cards have been played.</div>'
+      }
+    </div>
+    <h3 class="muted" style="margin:12px 0 6px;">Already Played (${playedCards.length})</h3>
+    <div class="card-grid">
+      ${
+        playedCards.length
+          ? playedCards.map((c) => renderStatusCard(c, true)).join("")
+          : '<div class="muted">No cards played yet.</div>'
+      }
+    </div>
+  `;
+}
+
 function renderHistoryLog() {
   if (!matchState) return;
   $("historyLog").innerHTML = matchState.history
@@ -1650,8 +1807,13 @@ function renderRulesAndAuditModal() {
       <div class="rule-line"><b>Vice-Captain (1.4×):</b> Multiplies successful attack damage by <b>1.4×</b> and successful block shield gain by <b>1.4×</b>.</div>
     </div>
     <div class="rule-box">
+      <h4>🔥 Intense Mode vs Default Mode <span class="rule-badge-branch">${isIntenseMode() ? "INTENSE" : "DEFAULT"}</span></h4>
+      <div class="rule-line"><b>Default Mode:</b> No style-exploration restriction across rounds or match.</div>
+      <div class="rule-line"><b>Intense Mode:</b> Within every <b>5 rounds</b>, you must explore at least <b>3 distinct combat styles</b>, and across the <b>full match</b> you must explore at least <b>4 distinct combat styles</b>.</div>
+    </div>
+    <div class="rule-box">
       <h4>🛡️ Manual Shield &amp; HP <span class="rule-badge-branch">10.00 HP</span></h4>
-      <div class="rule-line"><b>Starting HP:</b> 10.00 HP per team. Spend <b>2.00 Shield</b> on your turn to restore up to <b>+1.125 HP</b> and up to <b>+0.50 Temp HP</b>.</div>
+      <div class="rule-line"><b>Starting HP:</b> 10.00 HP per team. Spend <b>2.00 Shield</b> on your turn to gain <b>+20% HP</b> (<b>+2.00 HP</b> on a 10.00 HP pool).</div>
       <div class="rule-line"><b>Tier Progression:</b> Clear all fighters in Level 1 → Level 2 → Level 3 → Level 4 → Level 5 → Special.</div>
     </div>
     ${auditHtml}

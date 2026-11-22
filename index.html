@@ -75,7 +75,7 @@
         </div>
       </div>
 
-      <div class="grid-2">
+      <div class="grid-3">
         <div class="field">
           <label for="presetSelect">Match Preset</label>
           <select id="presetSelect">
@@ -90,6 +90,13 @@
             <option value="Dynamic Meta">Dynamic Meta (Random 3 Styles)</option>
             <option value="Weakest Meta">Weakest Meta (Weakest 3 Styles)</option>
             <option value="Random">Random Draft (15–16 Pool / Tier)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="intenseModeSelect">Intense Mode</label>
+          <select id="intenseModeSelect">
+            <option value="default" selected>Default Mode (No Exploration Rule)</option>
+            <option value="intense">Intense Mode (≥3 Styles / 5 Rounds · ≥4 Styles / Match)</option>
           </select>
         </div>
       </div>
@@ -280,6 +287,15 @@
           <button id="btnPlayAgain" class="btn-primary full-width">Start New Match</button>
         </div>
       </div>
+
+      <!-- MY FULL ROSTER: PLAYED vs NOT PLAYED CARDS -->
+      <details id="myRosterDetails" class="panel">
+        <summary class="row-between" style="cursor:pointer;">
+          <span><strong>🃏 My Roster — Played &amp; Not Played Cards</strong></span>
+          <span id="rosterSummaryPill" class="pill">0 Played · 0 Left</span>
+        </summary>
+        <div id="myRosterStatusBody" style="margin-top:10px;"></div>
+      </details>
 
       <!-- BATTLE HISTORY LOG -->
       <details class="panel">

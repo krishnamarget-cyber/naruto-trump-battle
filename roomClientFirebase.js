@@ -87,16 +87,16 @@ export class FirebaseRoomClient {
     this.disconnect();
     const b = await this._getBackend();
     const code = this._normalizeCode(customCode || generateRoomCode());
-    const host = await b.get(b.ref(`nweb098_rooms/${code}/host`));
+    const host = await b.get(b.ref(`rooms/${code}/host`));
     if (host.exists() && host.val()?.sid !== this.sid) {
       throw new Error(`Room code ${code} is already in use. Pick another code.`);
     }
     if (!host.exists()) {
       // Free code. Keep it untouched only if it holds MY saved match; otherwise clear stale leftovers.
-      const st = await b.get(b.ref(`nweb098_rooms/${code}/state`));
+      const st = await b.get(b.ref(`rooms/${code}/state`));
       const v = st.exists() ? st.val() : null;
       const mine = v && v.sid === this.sid && Date.now() - (v.t || 0) < STATE_MAX_AGE_MS;
-      if (!mine) await b.remove(b.ref(`nweb098_rooms/${code}`));
+      if (!mine) await b.remove(b.ref(`rooms/${code}`));
     }
     this.role = "HOST";
     this.roomCode = code;
@@ -108,9 +108,9 @@ export class FirebaseRoomClient {
     this.disconnect();
     const b = await this._getBackend();
     const c = this._normalizeCode(code);
-    const host = await b.get(b.ref(`nweb098_rooms/${c}/host`));
+    const host = await b.get(b.ref(`rooms/${c}/host`));
     if (!host.exists()) throw new Error(`Room ${c} not found. Check the code and make sure the host created it.`);
-    const guest = await b.get(b.ref(`nweb098_rooms/${c}/guest`));
+    const guest = await b.get(b.ref(`rooms/${c}/guest`));
     if (guest.exists() && guest.val()?.sid !== this.sid) {
       throw new Error(`Room ${c} already has two players. If you just lost connection, wait about a minute and try again.`);
     }
@@ -124,9 +124,9 @@ export class FirebaseRoomClient {
     const code = this.roomCode;
     const mine = this.role === "HOST" ? "host" : "guest";
     const other = this.role === "HOST" ? "guest" : "host";
-    const myRef = b.ref(`nweb098_rooms/${code}/${mine}`);
-    const otherRef = b.ref(`nweb098_rooms/${code}/${other}`);
-    const msgsRef = b.ref(`nweb098_rooms/${code}/msgs`);
+    const myRef = b.ref(`rooms/${code}/${mine}`);
+    const otherRef = b.ref(`rooms/${code}/${other}`);
+    const msgsRef = b.ref(`rooms/${code}/msgs`);
     this._myRef = myRef;
     this._b = b;
     this._seen = new Set();
@@ -184,7 +184,7 @@ export class FirebaseRoomClient {
   async saveState(obj) {
     if (!this._b || !this.roomCode || this.role !== "HOST") return;
     try {
-      await this._b.set(this._b.ref(`nweb098_rooms/${this.roomCode}/state`), {
+      await this._b.set(this._b.ref(`rooms/${this.roomCode}/state`), {
         sid: this.sid, t: Date.now(), p: JSON.stringify(obj),
       });
     } catch (err) {
@@ -195,7 +195,7 @@ export class FirebaseRoomClient {
   async loadState() {
     if (!this._b || !this.roomCode || this.role !== "HOST") return null;
     try {
-      const snap = await this._b.get(this._b.ref(`nweb098_rooms/${this.roomCode}/state`));
+      const snap = await this._b.get(this._b.ref(`rooms/${this.roomCode}/state`));
       if (!snap.exists()) return null;
       const v = snap.val();
       if (!v || v.sid !== this.sid || Date.now() - (v.t || 0) > STATE_MAX_AGE_MS) return null;
@@ -207,7 +207,7 @@ export class FirebaseRoomClient {
 
   async clearState() {
     if (!this._b || !this.roomCode || this.role !== "HOST") return;
-    try { await this._b.remove(this._b.ref(`nweb098_rooms/${this.roomCode}/state`)); } catch {}
+    try { await this._b.remove(this._b.ref(`rooms/${this.roomCode}/state`)); } catch {}
   }
 
   send(payload) {
@@ -218,7 +218,7 @@ export class FirebaseRoomClient {
       return;
     }
     Promise.resolve(
-      this._b.push(this._b.ref(`nweb098_rooms/${this.roomCode}/msgs`), { from: this.role, p: text, t: Date.now() })
+      this._b.push(this._b.ref(`rooms/${this.roomCode}/msgs`), { from: this.role, p: text, t: Date.now() })
     ).catch((err) => this._emit("error", { message: err?.message || "Send failed", nonFatal: true }));
   }
 

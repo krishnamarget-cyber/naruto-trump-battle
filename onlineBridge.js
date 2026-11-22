@@ -1,15 +1,18 @@
-// onlineBridge.js — Room-code online multiplayer bridge using N13's RoomMultiplayerClient (Firebase RTDB + sid + onDisconnect)
+// onlineBridge.js — Interactive online lobby & 2-device flow over Firebase RTDB (N13 RoomMultiplayerClient)
 import { RoomMultiplayerClient } from "./roomClientAuto.js";
 
 const room = new RoomMultiplayerClient();
 let onlineEnabled = false;
 let onlineRole = null; // "HOST" | "GUEST"
+let peerJoined = false;
 let pendingGuestMove = null;
 let myMoveLocked = false;
 
 function setLobbyMsg(text) {
   const el = document.getElementById("ntbOnlineMsg");
   if (el) el.textContent = text;
+  const liveBanner = document.getElementById("ntbLiveBannerText");
+  if (liveBanner) liveBanner.textContent = text;
 }
 
 function setBadge(text) {
@@ -38,6 +41,74 @@ function serializeGameState() {
     reason: g.reason || "",
     currentPlayer: g.currentPlayer,
   };
+}
+
+function renderConnectedLobbyCard() {
+  if (!onlineEnabled || !room.roomCode) return;
+  const appEl = document.getElementById("app");
+  if (!appEl) return;
+
+  // Only show the pre-match lobby card on the initial menu screen so draft/leader/battle screens stay clean
+  const hasStartBtn = Boolean(appEl.querySelector('button[onclick*="start("]'));
+  if (!hasStartBtn) return;
+
+  const isHost = onlineRole === "HOST";
+  const statusLabel = peerJoined ? "OPPONENT CONNECTED" : "WAITING FOR OPPONENT";
+  const actionBtnHtml = isHost
+    ? `<button type="button" class="btn primary" id="ntbLaunchOnlineDraftBtn" style="width:100%;margin-top:10px;">START ONLINE MATCH (DRAFT TEAMS)</button>`
+    : `<div class="panel" style="margin-top:10px;text-align:center;"><span class="tag">GUEST READY</span><p class="muted" style="margin-top:6px;">Connected to room <b>${room.roomCode}</b>. Waiting for Host to start the draft and send your team...</p></div>`;
+
+  appEl.innerHTML = `
+    <section class="page">
+      <div class="hero">
+        <div class="eyebrow">FIREBASE REALTIME ROOM</div>
+        <h2 class="gold">ROOM ${room.roomCode}</h2>
+        <p class="muted">Role: <b>${onlineRole}</b> · <span class="good">${statusLabel}</span></p>
+      </div>
+      <div class="panel" style="margin-top:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <b>MATCH CONNECTION</b>
+          <span class="tag">${peerJoined ? "2/2 CONNECTED" : "1/2 WAITING"}</span>
+        </div>
+        <p id="ntbLiveBannerText" class="muted" style="margin-top:8px;">
+          ${
+            isHost
+              ? (peerJoined
+                  ? "Player 2 is in the room! Click below to configure match preset & selection mode."
+                  : `Share room code <b>${room.roomCode}</b> with Player 2. You can start whenever ready.`)
+              : `Joined room <b>${room.roomCode}</b>. Stay on this screen while Host sets up the draft.`
+          }
+        </p>
+        ${actionBtnHtml}
+        <button type="button" class="btn" id="ntbLeaveRoomBtn" style="width:100%;margin-top:8px;">LEAVE ROOM</button>
+      </div>
+    </section>
+  `;
+
+  const launchBtn = document.getElementById("ntbLaunchOnlineDraftBtn");
+  if (launchBtn) {
+    launchBtn.onclick = () => {
+      if (typeof room.send === "function") {
+        room.send({ type: "NTB_HOST_OPEN_DRAFT" });
+      }
+      if (typeof window.start === "function") {
+        window.start("online", "Medium");
+      }
+    };
+  }
+
+  const leaveBtn = document.getElementById("ntbLeaveRoomBtn");
+  if (leaveBtn) {
+    leaveBtn.onclick = () => {
+      room.disconnect();
+      onlineEnabled = false;
+      onlineRole = null;
+      peerJoined = false;
+      pendingGuestMove = null;
+      myMoveLocked = false;
+      if (typeof window.menu === "function") window.menu();
+    };
+  }
 }
 
 function ensureRoomPanel() {
@@ -70,7 +141,8 @@ function ensureRoomPanel() {
       onlineRole = room.role || "HOST";
       document.getElementById("ntbRoomInput").value = code;
       setBadge(`HOST · ${code}`);
-      setLobbyMsg(`Room ${code} created! Share code with Player 2, then pick a match mode.`);
+      setLobbyMsg(`Room ${code} created! Share code with Player 2.`);
+      renderConnectedLobbyCard();
       if (typeof room.loadState === "function") {
         const saved = await room.loadState();
         if (saved && saved.rosters && saved.rosters[0]?.length && !saved.finished) {
@@ -100,8 +172,9 @@ function ensureRoomPanel() {
       onlineEnabled = true;
       onlineRole = room.role || "GUEST";
       setBadge(`GUEST · ${code}`);
-      setLobbyMsg(`Joined room ${code}! Waiting for Host to draft & sync teams...`);
+      setLobbyMsg(`Joined room ${code}! Waiting for Host to start match...`);
       room.send({ type: "NTB_GUEST_READY" });
+      renderConnectedLobbyCard();
     } catch (e) {
       setLobbyMsg(e.message);
     }
@@ -109,6 +182,7 @@ function ensureRoomPanel() {
 }
 
 room.on("peer_connected", ({ transport } = {}) => {
+  peerJoined = true;
   const code = room.roomCode || "";
   setBadge(`CONNECTED (${onlineRole || "PEER"} · ${transport || "firebase"})`);
   if (onlineRole === "GUEST") {
@@ -116,10 +190,12 @@ room.on("peer_connected", ({ transport } = {}) => {
   } else if (onlineRole === "HOST" && window.G?.confirmed?.[0]) {
     room.send({ type: "NTB_RESYNC", state: serializeGameState() });
   }
+  renderConnectedLobbyCard();
   if (code) setLobbyMsg(`Connected in room ${code}.`);
 });
 
 room.on("peer_disconnected", () => {
+  peerJoined = false;
   setBadge(`WAITING (${room.roomCode || "ROOM"})`);
   setLobbyMsg("Opponent disconnected. Waiting for reconnection...");
 });
@@ -136,7 +212,22 @@ room.on("message", (msg) => {
   if (!msg || !msg.type || !window.G) return;
 
   if (msg.type === "NTB_GUEST_READY" && onlineRole === "HOST") {
-    setLobbyMsg("Player 2 connected! Start a match and confirm your team to sync rosters.");
+    peerJoined = true;
+    setLobbyMsg("Player 2 connected! Ready to start the online match.");
+    renderConnectedLobbyCard();
+  } else if (msg.type === "NTB_HOST_OPEN_DRAFT" && onlineRole === "GUEST") {
+    const appEl = document.getElementById("app");
+    if (appEl) {
+      appEl.innerHTML = `
+        <section class="page">
+          <div class="hero">
+            <div class="eyebrow">ROOM ${room.roomCode}</div>
+            <h2 class="gold">HOST IS DRAFTING TEAMS</h2>
+            <p class="muted">Choosing match preset &amp; selection mode. Your roster will appear as soon as Host confirms.</p>
+          </div>
+        </section>
+      `;
+    }
   } else if (msg.type === "NTB_RESYNC" && onlineRole === "GUEST" && msg.state) {
     const s = msg.state;
     window.G.mode = "online";

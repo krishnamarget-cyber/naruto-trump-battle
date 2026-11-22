@@ -1,252 +1,1721 @@
-const $=s=>document.querySelector(s);const DBPromise=fetch('cards.json').then(r=>r.json());
-const STYLES={Taijutsu:['T_ATK','T_DEF'],Kunai:['K_ATK','K_DEF'],Special:['S_ATK','S_DEF'],Ninjutsu:['N_ATK','N_DEF'],Genjutsu:['G_ATK','G_DEF']};
-const C={hp:10,maxHp:10,shield:0,threshold:2,temp:0,maxTemp:.5,recovery:1.125};
-let db=[],G={mode:'local',difficulty:'Medium',rosters:[[],[]],captain:['',''],vice:['',''],confirmed:[false,false],used:[new Set(),new Set()],hp:[10,10],shield:[0,0],temp:[0,0],level:1,round:0,history:[],pick:['',''],style:['',''],status:'',currentPlayer:1};
-const app=$('#app');const shuffle=a=>{a=[...a];for(let i=a.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};const card=id=>db.find(c=>c.id===id);const fmt=n=>(Math.round(n*100)/100).toFixed(2);const levelName=l=>l===6?'SPECIAL':`LEVEL ${l}`;
-function page(html){app.innerHTML=`<section class="page">${html}</section>`;window.scrollTo(0,0)}function btn(text,fn,cls='btn'){return `<button class="btn ${cls}" onclick="${fn}">${text}</button>`}function portrait(c){return `assets/portraits/${c.id}.png`}
-function menu(){page(`<div class="hero"><h1 class="gold">NARUTO</h1><h2>TRUMP BATTLE</h2><p class="muted">PASS & PLAY • 120 CARDS • SMART TEAM DRAFT</p></div><div class="stack" style="margin-top:22px">${btn('PASS & PLAY • 2 PLAYERS',"start('local')",'primary')}${btn('PLAY WITH COMPUTER',"difficulty()",'blue')}</div><p class="foot">MOBILE-FIRST • SIX-TIER CARD DRAFT</p>`)}
-function difficulty(){page(`<h2 class="gold center">CHOOSE DIFFICULTY</h2><div class="stack">${['Easy','Medium','Hard'].map(x=>btn(x,`start('computer','${x}')`)).join('')}${btn('BACK', 'menu()')}</div>`)}
-const MATCH_PRESETS={
- Quick:{label:'QUICK MATCH',perPlayer:10,distribution:{1:2,2:2,3:2,4:2,5:1,6:1}},
- Standard:{label:'STANDARD MATCH',perPlayer:15,distribution:{1:3,2:3,3:3,4:3,5:2,6:1}}
+// app.js — N13_firebase UI + 60fps BattleFxEngine + Online Room Multiplayer for 120-Card Naruto Trump Battle
+import { BattleFxEngine } from "./battleFx.js";
+import { RoomMultiplayerClient } from "./roomClientAuto.js";
+
+const $ = (id) => document.getElementById(id);
+const LEVELS = [1, 2, 3, 4, 5, 6];
+const levelName = (l) => (Number(l) === 6 ? "Special" : `L${l}`);
+const fmt = (n) => (Math.round(Number(n || 0) * 100) / 100).toFixed(2);
+
+const STYLES = {
+  Taijutsu: { atk: "T_ATK", def: "T_DEF", short: "TAI", fx: "tai" },
+  Ninjutsu: { atk: "N_ATK", def: "N_DEF", short: "NIN", fx: "nin" },
+  Genjutsu: { atk: "G_ATK", def: "G_DEF", short: "GEN", fx: "gen" },
+  Kunai: { atk: "K_ATK", def: "K_DEF", short: "KUN", fx: "kun" },
+  Special: { atk: "S_ATK", def: "S_DEF", short: "SPC", fx: "special" },
 };
-const ATTACK_FIELDS={Taijutsu:'T_ATK',Kunai:'K_ATK',Special:'S_ATK',Ninjutsu:'N_ATK',Genjutsu:'G_ATK'};
-let DRAFT={mode:'Balanced Meta',preset:'Standard',poolSize:'random',audit:[]};
-function start(mode,diff='Medium'){
- G={...G,mode,difficulty:diff,rosters:[[],[]],captain:['',''],vice:['',''],confirmed:[false,false],used:[new Set(),new Set()],hp:[10,10],shield:[0,0],temp:[0,0],level:1,round:0,history:[],pick:['',''],style:['',''],finished:false,reason:''};
- DRAFT={mode:'Balanced Meta',preset:'Standard',poolSize:'random',audit:[]};
- draftSetupScreen();
-}
-function draftSetupScreen(){
- const p=MATCH_PRESETS[DRAFT.preset];
- page(`<div class="hero"><div class="eyebrow">MATCH CONFIGURATION</div><h2 class="gold">BUILD YOUR TEAM POOL</h2><p class="muted">Each tier is reduced from 20 cards to a 15- or 16-card candidate pool. Your roster is then randomly drawn from that pool.</p></div>
- <section class="panel draft-settings">
-  <h3 class="gold">1. MATCH PRESET</h3>
-  <div class="preset-grid">${Object.entries(MATCH_PRESETS).map(([k,v])=>`<button class="preset-option ${DRAFT.preset===k?'active':''}" onclick="setDraftPreset('${k}')"><b>${v.label}</b><strong>${v.perPlayer} CARDS</strong><small>${Object.entries(v.distribution).map(([l,n])=>`L${l}:${n}`).join(' · ')}</small></button>`).join('')}</div>
-  <h3 class="gold">2. SELECTION ALGORITHM</h3>
-  <div class="draft-mode-grid">${['Balanced Meta','Dynamic Meta','Weakest Meta','Random'].map(m=>`<button class="draft-mode ${DRAFT.mode===m?'active':''}" onclick="setDraftMode('${m}')"><b>${m}</b><small>${m==='Balanced Meta'?'All five attack styles':m==='Dynamic Meta'?'Random three attack styles':' ' + (m==='Weakest Meta'?'Weakest three-style meta':'No stat ranking; random pool')}</small></button>`).join('')}</div>
-  <h3 class="gold">3. CANDIDATE POOL SIZE</h3>
-  <div class="pool-size-row"><div class="pool-size active">RANDOM 15 OR 16 CARDS</div></div>
-  <p class="muted">Each tier independently receives a randomly sized 15- or 16-card candidate pool. The final roster draw is random.</p>
-  <div class="draft-summary"><div><small>YOUR TEAM</small><b>${p.perPlayer} CARDS</b></div><div><small>OPPONENT</small><b>${p.perPlayer} CARDS</b></div><div><small>POOL PER TIER</small><b>15–16 / 20</b></div></div>
-  ${btn('GENERATE CANDIDATE POOLS & DRAW TEAMS','generateDraft()','primary')}
-  ${btn('BACK TO MAIN MENU','menu()','')}
- </section>`);
-}
-function setDraftPreset(k){if(!MATCH_PRESETS[k])return;DRAFT.preset=k;draftSetupScreen()}
-function setDraftMode(m){if(!['Balanced Meta','Dynamic Meta','Weakest Meta','Random'].includes(m))return;DRAFT.mode=m;draftSetupScreen()}
-function setPoolSize(n){return}
-function average(a){return a.length?a.reduce((x,y)=>x+y,0)/a.length:0}
-function styleStats(c){return Object.entries(ATTACK_FIELDS).map(([style,key])=>({style,key,value:Number(c[key])||0}))}
-function cardMeta(c,tierCards){
- const styles=styleStats(c),vals=styles.map(x=>x.value),means=Object.keys(ATTACK_FIELDS).map(k=>average(tierCards.map(x=>Number(x[ATTACK_FIELDS[k]])||0)));
- const density=styles.filter((x,i)=>x.value>=means[i]).length;
- const avg=average(vals),floor=Math.min(...vals);
- return {avg,floor,density,styles};
-}
-function rankByStyle(tierCards,style,descending=true){
- const key=ATTACK_FIELDS[style];
- return [...tierCards].sort((a,b)=>descending?(Number(b[key])-Number(a[key])||a.id.localeCompare(b.id)):(Number(a[key])-Number(b[key])||a.id.localeCompare(b.id)));
-}
-function rankComposite(tierCards,descending=true){
- const metas=new Map(tierCards.map(c=>[c.id,cardMeta(c,tierCards)]));
- return [...tierCards].sort((a,b)=>{
-  const A=metas.get(a.id),B=metas.get(b.id);
-  const scoreA=A.avg*0.7+A.floor*0.2+A.density*0.1,scoreB=B.avg*0.7+B.floor*0.2+B.density*0.1;
-  return (descending?-1:1)*(scoreA-scoreB)||a.id.localeCompare(b.id);
- });
-}
-function chooseThreeStyles(){
- const names=Object.keys(ATTACK_FIELDS);
- return shuffle(names).slice(0,3);
-}
-function buildTierCandidatePool(tier,mode,poolSize){
- const cards=tier.map(c=>({...c})),target=poolSize,selected=[],selectedIds=new Set(),holds=[],container=[];
- if(mode==='Random'){
-  const randomPool=shuffle(cards).slice(0,target);
-  const counts={high:0,medium:0,low:0};
-  for(const c of cards){const d=cardMeta(c,cards).density;counts[d>=4?'high':d>=2?'medium':'low']++}
-  return {cards:randomPool,styles:[],stages:randomPool.map(c=>({id:c.id,stage:'Random pool'})),density:counts};
- }
- const add=(c,stage)=>{if(c&&!selectedIds.has(c.id)&&selected.length<target){selectedIds.add(c.id);selected.push({card:c,stage});return true}return false};
- const addHold=(c,reason)=>{if(c&&!selectedIds.has(c.id)&&!holds.some(x=>x.card.id===c.id))holds.push({card:c,reason})};
- const chosenStyles=mode==='Balanced Meta'?Object.keys(ATTACK_FIELDS):mode==='Random'?[]:chooseThreeStyles();
- const direction=mode==='Weakest Meta'?false:true;
- const styleRanks={};
- for(const style of Object.keys(ATTACK_FIELDS))styleRanks[style]=rankByStyle(cards,style,true);
 
- // Phase 1 — style anchors: inspect up to the top five cards in each selected style.
- // Keep the strongest/weakest two distinct cards per style; later duplicates become Holds.
- if(mode!=='Random'){
-  for(const style of chosenStyles){
-   const rank=rankByStyle(cards,style,direction);
-   let found=0;
-   for(const c of rank.slice(0,5)){
-    if(found<2){
-     if(add(c,`P1 · ${style} ${direction?'top':'bottom'} anchor`))found++;
-     else addHold(c,`P1 duplicate-style hold · ${style}`);
-    }else addHold(c,`P1 reserve · ${style}`);
-   }
-  }
- }else{
-  shuffle(cards).slice(0,Math.min(8,target)).forEach(c=>add(c,'P1 · random seed'));
- }
+const STAT_KEYS = ["T_ATK", "T_DEF", "N_ATK", "N_DEF", "G_ATK", "G_DEF", "K_ATK", "K_DEF", "S_ATK", "S_DEF"];
 
- // Phase 2 — promote Holds and containers, preferring candidates that add new style strengths.
- const holdsSorted=holds.slice().sort((a,b)=>{
-  const A=cardMeta(a.card,cards),B=cardMeta(b.card,cards);
-  return (direction?-1:1)*(A.avg-B.avg);
- });
- for(const h of holdsSorted){if(selected.length>=Math.min(10,target))break;add(h.card,'P2 · Hold promotion')}
- const comp=rankComposite(cards,direction);
- for(const c of comp){if(selected.length>=Math.min(10,target))break;if(!selectedIds.has(c.id))container.push(c)}
- for(const c of container)add(c,'P2 · container promotion');
+const MATCH_PRESETS = {
+  Quick: { label: "Quick Match", perPlayer: 10, distribution: { 1: 2, 2: 2, 3: 2, 4: 2, 5: 1, 6: 1 } },
+  Standard: { label: "Standard Match", perPlayer: 15, distribution: { 1: 3, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1 } },
+};
 
- // Phase 3 — attack-density balance: include high, medium and low-density cards.
- const meta=new Map(cards.map(c=>[c.id,cardMeta(c,cards)]));
- const densityGroups={high:[],medium:[],low:[]};
- for(const c of cards){const d=meta.get(c.id).density;(d>=4?densityGroups.high:d>=2?densityGroups.medium:densityGroups.low).push(c)}
- for(const group of Object.values(densityGroups))group.sort((a,b)=>(direction?-1:1)*(meta.get(a.id).avg-meta.get(b.id).avg));
- const densityOrder=mode==='Weakest Meta'?['low','medium','high']:['high','medium','low'];
- let cursor=0;
- while(selected.length<Math.min(13,target)){
-  let moved=false;
-  for(const key of densityOrder){
-   const c=densityGroups[key].find(x=>!selectedIds.has(x.id));
-   if(c){add(c,`P3 · ${key} attack-density promotion`);moved=true;if(selected.length>=Math.min(13,target))break}
-  }
-  if(!moved)break;
-  cursor++;
-  if(cursor>cards.length)break;
- }
+const ATTACK_FIELDS = { Taijutsu: "T_ATK", Kunai: "K_ATK", Special: "S_ATK", Ninjutsu: "N_ATK", Genjutsu: "G_ATK" };
 
- // Phase 4 — final bonus candidates: reward balanced multi-style capability and useful specialist strength.
- const bonusRank=cards.map(c=>{
-  const m=meta.get(c.id),styleRankSum=Object.keys(ATTACK_FIELDS).reduce((sum,style)=>{
-   const r=styleRanks[style].findIndex(x=>x.id===c.id);
-   return sum+(r<0?cards.length:r);
-  },0);
-  return {c,score:(direction?1:-1)*(m.avg*0.55+m.floor*0.25+m.density*0.12+(1-styleRankSum/(cards.length*5))*0.08)};
- }).sort((a,b)=>b.score-a.score);
- for(const x of bonusRank){if(selected.length>=target)break;add(x.c,'P4 · final bonus selection')}
+let db = [];
+let tierAverages = {};
+let draftedTeams = null;
+let matchState = null;
+let lastClashRecord = null;
+let animTimers = [];
+let sfxEnabled = true;
 
- // Phase 5 — validate, de-duplicate, optional mode-specific filtering and exact pool size.
- // If any slot remains, fill from the remaining ranked candidates. The output order is randomized.
- if(selected.length<target){
-  const fill=mode==='Random'?shuffle(cards):rankComposite(cards,direction);
-  for(const c of fill){if(selected.length>=target)break;add(c,'P5 · validation fill')}
- }
- let final=selected.map(x=>({...x.card,_poolStage:x.stage}));
- if(final.length>target)final=final.slice(0,target);
- final=shuffle(final);
- return {cards:final,styles:chosenStyles,stages:selected.map(x=>({id:x.card.id,stage:x.stage})),density:{high:densityGroups.high.length,medium:densityGroups.medium.length,low:densityGroups.low.length}};
+// Play mode: "local" | "online" | "computer"
+let playMode = "local";
+const roomClient = new RoomMultiplayerClient();
+let remoteMoveBuffer = null;
+let myMoveLockedOnline = false;
+let lastAppliedOnlineRound = 0;
+
+// Leader selection temporary state
+let leaderDraftStep = "A";
+let tempCapA = null;
+let tempVcA = null;
+let tempCapB = null;
+let tempVcB = null;
+
+// Simultaneous turn state (Pass & Play)
+let pickStep = "P1_PICK"; // "P1_PICK" | "P2_PICK" | "CLASH_REVEAL"
+let selectedCardId = null;
+let selectedStyle = "Taijutsu";
+let lockedMoveA = null;
+
+const fxEngine = new BattleFxEngine($("fxCanvas"), $("battleStage"));
+
+function isOnline() {
+  return playMode === "online";
 }
-function generateDraft(){
- const preset=MATCH_PRESETS[DRAFT.preset],pools={},audit=[];
- for(let l=1;l<=6;l++){
-  const tier=db.filter(c=>Number(c.level)===l);
-  if(tier.length!==20){page(`<div class="panel danger">Tier ${levelName(l)} must contain exactly 20 source cards. Found ${tier.length}. No teams were generated.</div>${btn('BACK','draftSetupScreen()')}`);return}
-  const tierPoolSize=15+Math.floor(Math.random()*2);
-  const built=buildTierCandidatePool(tier,DRAFT.mode,tierPoolSize);
-  const need=preset.distribution[l]*2;
-  if(built.cards.length<need){page(`<div class="panel danger">Candidate pool for ${levelName(l)} is too small for this preset.</div>${btn('BACK','draftSetupScreen()')}`);return}
-  const picked=shuffle(built.cards).slice(0,need);
-  const split=shuffle(picked);
-  const p1=split.slice(0,preset.distribution[l]),p2=split.slice(preset.distribution[l]);
-  pools[l]={p1,p2};
-  audit.push({level:l,pool:built.cards.length,styles:built.styles,need,selected:need,density:built.density,stages:built.stages,poolCards:built.cards.map(c=>({id:c.id,name:c.name}))});
- }
- for(let l=1;l<=6;l++){G.rosters[0].push(...pools[l].p1);G.rosters[1].push(...pools[l].p2)}
- G.currentPlayer=1;
- G.draftAudit=audit;
- G.matchPreset=DRAFT.preset;
- G.selectionMode=DRAFT.mode;
- G.candidatePoolSize='random 15–16 per tier';
- if(G.mode==='computer'){
-  let r=shuffle(G.rosters[1]);G.captain[1]=r[0].id;G.vice[1]=r[1].id;G.confirmed[1]=true;
- }
- teamScreen();
+function isComputer() {
+  return playMode === "computer";
 }
-function draftAuditScreen(){
- const rows=G.draftAudit||[];
- page(`<div class="hero"><div class="eyebrow">TEAM GENERATION REPORT</div><h2 class="gold">SELECTION AUDIT</h2><p class="muted">${G.selectionMode||'Balanced Meta'} · ${G.matchPreset||'Standard'} Match · Independent random 15/16-card pool per tier</p></div>
- <div class="panel"><h3 class="gold">FIVE-PHASE POOL CONSTRUCTION</h3>
- <ol class="draft-phases"><li><b>Phase 1 — Style anchors</b><span>Top or bottom two distinct cards per selected attack style, inspecting up to five positions. Duplicate-style candidates are held.</span></li><li><b>Phase 2 — Holds & promotions</b><span>Promote eligible held cards and fill from the container using the mode's strength direction.</span></li><li><b>Phase 3 — Attack density</b><span>Balance high, medium and low attack-density candidates.</span></li><li><b>Phase 4 — Final bonus</b><span>Fill remaining spaces using multi-style average, floor and density scoring.</span></li><li><b>Phase 5 — Validation</b><span>Remove duplicates, fill any gaps and shuffle the final candidate pool.</span></li></ol></div>
- <div class="panel"><h3 class="gold">TIER-BY-TIER RESULTS</h3>${rows.map(r=>`<div class="audit-tier"><div class="audit-tier-head"><b>${levelName(r.level)}</b><span>${r.pool} candidate cards</span></div><p>Styles: ${r.styles.length?r.styles.join(' · '):'Random selection'}</p><p>Density distribution: High ${r.density.high} · Medium ${r.density.medium} · Low ${r.density.low}</p><p>Randomly drawn for match: ${r.selected} total (${r.need/2} per player)</p><details><summary>View candidate cards</summary><div class="audit-card-list">${r.poolCards.map(c=>`<span>${c.id} · ${c.name}</span>`).join('')}</div></details></div>`).join('')}</div>
- ${btn('BACK TO TEAM SELECTION','teamScreen()','primary')}`);
+function mySide() {
+  if (!isOnline()) return pickStep === "P1_PICK" ? "A" : "B";
+  return roomClient.role === "GUEST" ? "B" : "A";
 }
-function teamScreen(){let p=G.currentPlayer,roster=G.rosters[p-1];page(`<h2 class="gold center">PLAYER ${p} — TEAM SELECTION</h2><p class="muted center">Choose one Captain and one different Vice Captain. Your choices remain private.</p><div class="draft-meta-strip"><span>${G.matchPreset||'STANDARD'} MATCH</span><span>${G.selectionMode||'BALANCED META'}</span><span>15–16 POOL / TIER</span></div>${btn('VIEW SELECTION AUDIT','draftAuditScreen()','blue')}<div class="rolebar"><div class="rolepill">★ Captain: <b id="captain-name">${card(G.captain[p-1])?.name||'Not selected'}</b></div><div class="rolepill">☆ Vice: <b id="vice-name">${card(G.vice[p-1])?.name||'Not selected'}</b></div></div><div id="msg" class="status"></div><div>${roster.map(c=>teamCard(c,p)).join('')}</div>${btn('CONFIRM TEAM',`confirmTeam(${p})`,'primary')}`)}
-function teamCard(c,p){let cap=G.captain[p-1]===c.id,vice=G.vice[p-1]===c.id;return `<article class="card ${cap?'captain-card':vice?'vice-card':''}"><img class="portrait" src="${portrait(c)}" onerror="this.style.visibility='hidden'"><div><div class="cardname">${c.name}</div><div class="muted">${c.id} • ${levelName(c.level)}</div><div class="stats">${['T_ATK','T_DEF','K_ATK','K_DEF','S_ATK','S_DEF','N_ATK','N_DEF','G_ATK','G_DEF'].map(k=>`${k} ${c[k]}`).join(' · ')}</div><div class="rolebtns"><button type="button" class="btn role-choice ${cap?'blue selected':''}" data-role="cap" data-card="${c.id}" onclick="setRole(${p},'cap','${c.id}')">${cap?'✓ CAPTAIN':'★ Captain'}</button><button type="button" class="btn role-choice ${vice?'green selected':''}" data-role="vice" data-card="${c.id}" onclick="setRole(${p},'vice','${c.id}')">${vice?'✓ VICE CAPTAIN':'☆ Vice Captain'}</button></div></div></article>`}
-function refreshRoleButtons(p){
-  const i=p-1,capId=G.captain[i],viceId=G.vice[i];
-  document.querySelectorAll('.role-choice').forEach(el=>{
-    const id=el.dataset.card,role=el.dataset.role;
-    const selected=(role==='cap'&&id===capId)||(role==='vice'&&id===viceId);
-    const conflict=(role==='cap'&&id===viceId)||(role==='vice'&&id===capId);
-    el.classList.toggle('blue',selected&&role==='cap');
-    el.classList.toggle('green',selected&&role==='vice');
-    el.classList.toggle('selected',selected);
-    el.classList.toggle('role-conflict',conflict);
-    el.disabled=conflict||G.confirmed[i];
-    el.textContent=selected?(role==='cap'?'✓ CAPTAIN':'✓ VICE CAPTAIN'):(role==='cap'?'★ Captain':'☆ Vice Captain');
-    const cardEl=el.closest('.card');
-    if(cardEl){cardEl.classList.toggle('captain-card',id===capId);cardEl.classList.toggle('vice-card',id===viceId)}
+
+function clearAnimTimers() {
+  animTimers.forEach((id) => clearTimeout(id));
+  animTimers = [];
+  fxEngine.clear();
+}
+
+function showScreen(screenId) {
+  clearAnimTimers();
+  ["screenSetup", "screenLeaders", "screenArena"].forEach((id) => {
+    $(id).classList.toggle("hidden", id !== screenId);
   });
-  const cap=document.getElementById('captain-name'),vice=document.getElementById('vice-name');
-  if(cap)cap.textContent=card(capId)?.name||'Not selected';
-  if(vice)vice.textContent=card(viceId)?.name||'Not selected';
+  $("btnRestartTop").classList.toggle("hidden", screenId === "screenSetup");
 }
-function setRole(p,role,id){
-  const i=p-1;
-  if(p!==G.currentPlayer||G.confirmed[i]||(role!=='cap'&&role!=='vice'))return;
-  const otherId=role==='cap'?G.vice[i]:G.captain[i];
-  if(id===otherId){const msg=$('#msg');if(msg)msg.textContent='Captain and Vice Captain must be different cards.';return}
-  G[role==='cap'?'captain':'vice'][i]=id;
-  refreshRoleButtons(p);
-  const chosen=card(id),msg=$('#msg');
-  if(msg)msg.textContent=(role==='cap'?'Captain':'Vice Captain')+' selected: '+(chosen?.name||id)+'. Selection saved.';
+
+function shuffle(a) {
+  a = [...a];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
 }
-function confirmTeam(p){let i=p-1;if(!G.captain[i]||!G.vice[i]){$('#msg').textContent='Choose both roles first.';return}if(G.captain[i]===G.vice[i])return;G.confirmed[i]=true;if(G.mode==='computer'){readyScreen()}else if(p===1){handover('team',2)}else{readyScreen()}}
-function handover(kind,next){page(`<div class="hero" style="margin-top:15vh"><h2 class="gold">${kind==='team'?'PLAYER 1 TEAM LOCKED':'PLAYER 1 CHOICE LOCKED'}</h2><h3>PASS THE DEVICE TO PLAYER ${next}</h3><p class="muted">Private selections are hidden. Continue only when Player ${next} has the device.</p>${btn(`PLAYER ${next} — I'M READY`,kind==='team'?`G.currentPlayer=2;teamScreen()`:'battleScreen(2)','primary')}</div>`)}
-function readyScreen(){page(`<div class="hero" style="margin-top:15vh"><h2 class="gold">BOTH TEAMS LOCKED</h2><p>${G.mode==='computer'?'Your team is ready. The computer is your opponent.':'Both teams are hidden. Pass the device to Player 1 to begin battle.'}</p>${btn('PLAYER 1 — BATTLE ENTRY','battleScreen(1)','primary')}</div>`)}
-function teamState(p){return `<div class="panel"><b>PLAYER ${p} STATUS</b>${bar('HP',G.hp[p-1],10,'#22c55e')}${bar('SHIELD',G.shield[p-1],2,'#3b82f6')}${bar('TEMP HP',G.temp[p-1],.5,'#a855f7')}</div>`}function bar(label,v,max,color){return `<div class="statline"><span>${label}</span><b>${fmt(v)} / ${fmt(max)}</b></div><div class="bar"><div class="fill" style="width:${Math.max(0,Math.min(100,v/max*100))}%;background:${color}"></div></div>`}
-function battleScreen(p,reset=true){G.currentPlayer=p;if(reset){G.pick[p-1]='';G.style[p-1]='Taijutsu'}let available=G.rosters[p-1].filter(c=>c.level===G.level&&!G.used[p-1].has(c.id));page(`<div class="hero"><b class="gold">NINJA BATTLE ARENA</b><div class="row"><b>PLAYER 1</b><b class="gold">VS</b><b>${G.mode==='computer'?'COMPUTER':'PLAYER 2'}</b></div><small>ROUND ${G.round+1} • ${levelName(G.level)}</small></div><h2 class="gold">PLAYER ${p} — CHOOSE YOUR FIGHTER</h2><p class="muted">Select a fighter, then an attack style. Your choice stays hidden until both sides commit.</p>${btn('VIEW MY PRIVATE CARD STATUS',`statusScreen(${p})`)}${btn(`BATTLE HISTORY (${G.history.length})`,`historyScreen(${p})`)}<div class="resultrow">${teamState(1)}${teamState(2)}</div><div class="panel shield-control"><b class="gold">MANUAL SHIELD</b><p class="muted">Spend 2.00 shield whenever you want to restore HP and temporary HP.</p><button class="btn blue" type="button" onclick="activateShield(${p})" ${G.shield[p-1]+0.000001<2?'disabled':''}>USE SHIELD • 2.00</button></div><h3 class="gold">AVAILABLE FIGHTERS • CURRENT LEVEL</h3>${available.length?available.map(c=>`<article class="card"><img class="portrait" src="${portrait(c)}"><div><div class="cardname">${c.name}</div><div class="muted">${c.id} • ${levelName(c.level)}</div>${G.captain[p-1]===c.id?'<div class="role-bonus-tag captain-tag">★ CAPTAIN • ×1.8 ATTACK / BLOCK</div>':G.vice[p-1]===c.id?'<div class="role-bonus-tag vice-tag">☆ VICE CAPTAIN • ×1.4 ATTACK / BLOCK</div>':''}<div class="stats">${['T_ATK','T_DEF','K_ATK','K_DEF','S_ATK','S_DEF','N_ATK','N_DEF','G_ATK','G_DEF'].map(k=>`${k} ${c[k]}`).join(' · ')}</div><button type="button" class="btn fighter-select ${G.pick[p-1]===c.id?'blue selected':''}" data-fighter="${c.id}" onclick="pickCard(${p},'${c.id}')">${G.pick[p-1]===c.id?'✓ FIGHTER SELECTED':'SELECT FIGHTER'}</button></div></article>`).join(''):'<p class="muted">No available fighters at this level.</p>'}<div class="panel"><h3 class="gold">CHOOSE YOUR ATTACK STYLE</h3><div class="stylegrid">${Object.keys(STYLES).map(s=>`<button type="button" class="btn style-select ${G.style[p-1]===s?'blue selected':''}" data-style="${s}" onclick="pickStyle(${p},'${s}')"><span class="style-emoji">${styleIcon(s)}</span> <span>${s}</span>${G.style[p-1]===s?' ✓':''}</button>`).join('')}</div></div><div id="msg" class="status">Choose a fighter and attack style.</div>${btn('LOCK IN FIGHTER & ATTACK',`lockBattle(${p})`,'primary')}`)}
-function pickCard(p,id){
-  if(p!==G.currentPlayer)return;
-  G.pick[p-1]=id;
-  document.querySelectorAll('[data-fighter]').forEach(el=>{const on=el.dataset.fighter===id;el.classList.toggle('blue',on);el.classList.toggle('selected',on);el.textContent=on?'✓ FIGHTER SELECTED':'SELECT FIGHTER'});
-  const msg=$('#msg');if(msg)msg.textContent='Fighter selected: '+(card(id)?.name||id)+'. Choose your attack style, then lock in.';
+
+function findCard(id) {
+  return db.find((c) => c.id === id);
 }
-function pickStyle(p,s){
-  if(p!==G.currentPlayer||!STYLES[s])return;
-  G.style[p-1]=s;
-  document.querySelectorAll('[data-style]').forEach(el=>{const on=el.dataset.style===s;el.classList.toggle('blue',on);el.classList.toggle('selected',on);el.innerHTML=`<span class="style-emoji">${styleIcon(el.dataset.style)}</span> <span>${el.dataset.style}</span>${on?' ✓':''}`});
-  const msg=$('#msg');if(msg)msg.textContent='Attack style selected: '+s+'. Now lock in your fighter and attack.';
+
+function portraitSrc(card) {
+  return `assets/portraits/${card.id}.png`;
 }
-function statusScreen(p){let roster=G.rosters[p-1];page(`<h2 class="gold">PLAYER ${p} — PRIVATE CARD STATUS</h2><p class="muted">Only this player's roster is shown. Used cards cannot be played again.</p>${roster.map(c=>`<article class="card ${G.used[p-1].has(c.id)?'disabled':''}"><img class="portrait" src="${portrait(c)}"><div><div class="cardname">${c.name}</div><div class="muted">${c.id} • ${levelName(c.level)}</div><span class="tag">${G.used[p-1].has(c.id)?'USED':'AVAILABLE'}</span></div></article>`).join('')}${btn('BACK TO BATTLE',`battleScreen(${p})`)}`)}
-function lockBattle(p){if(!G.pick[p-1]){$('#msg').textContent='Choose a fighter first.';return}if(G.mode==='computer'&&p===1){G.pick[1]=shuffle(G.rosters[1].filter(c=>c.level===G.level&&!G.used[1].has(c.id)))[0]?.id;G.style[1]=shuffle(Object.keys(STYLES))[0];resolveRound();return}if(p===1)handover('battle',2);else resolveRound()}
-function calcAttack(atk,def){return atk-def>0.0001?{damage:+(atk-def).toFixed(6),shield_gain:0}:{damage:0,shield_gain:+Math.max(def-atk,0).toFixed(6)}}
-function applyTeam(i,attack){let hp=G.hp[i],sh=G.shield[i],tmp=G.temp[i],damage=attack.damage,absorbed=Math.min(damage,tmp);tmp-=absorbed;let lost=Math.min(damage-absorbed,hp);hp-=lost;sh+=attack.shield_gain;G.hp[i]=+hp.toFixed(6);G.shield[i]=+sh.toFixed(6);G.temp[i]=+tmp.toFixed(6);return {damage_taken:damage,temp_absorbed:absorbed,hp_lost:lost,shield_gain:attack.shield_gain,activations:0,hp_restored:0,temp_hp_gained:0,temp_hp_discarded:0,hp:G.hp[i],shield:G.shield[i],temp_hp:G.temp[i]}}
-function activateShield(p){const i=p-1;if(p!==G.currentPlayer||G.shield[i]+0.000001<2)return;G.shield[i]=+(G.shield[i]-2).toFixed(6);let restored=Math.max(0,Math.min(1.125,10-G.hp[i]));G.hp[i]=+(G.hp[i]+restored).toFixed(6);let potential=(1.125-restored)*(.5/1.125),gained=Math.min(potential,.5-G.temp[i]);G.temp[i]=+(G.temp[i]+gained).toFixed(6);battleScreen(p,false);const msg=$('#msg');if(msg)msg.textContent=`Shield used: −2.00 shield, +${fmt(restored)} HP, +${fmt(gained)} temporary HP.`;}
-function roleBonus(player,fighterId){const i=player-1;if(G.captain[i]===fighterId)return 1.8;if(G.vice[i]===fighterId)return 1.4;return 1}
-function applyRoleBonus(attack,multiplier){
-  if(multiplier===1)return {...attack,role_bonus:0,role_multiplier:1,base_damage:attack.damage,base_shield_gain:attack.shield_gain};
-  if(attack.damage>0)return {...attack,base_damage:attack.damage,base_shield_gain:attack.shield_gain,damage:+(attack.damage*multiplier).toFixed(6),role_bonus:multiplier,role_multiplier:multiplier,bonus_type:'attack'};
-  // A non-damaging result is a successful block (including an exact tie).
-  const baseBlockGain=attack.shield_gain>0?attack.shield_gain:1;
-  return {...attack,base_damage:attack.damage,base_shield_gain:baseBlockGain,shield_gain:+(baseBlockGain*multiplier).toFixed(6),role_bonus:multiplier,role_multiplier:multiplier,bonus_type:'block'};
-}function resolveRound(){let c1=card(G.pick[0]),c2=card(G.pick[1]),s1=G.style[0],s2=G.style[1];if(!c1||!c2){page(`<p>Battle selection error: missing fighter.</p>${btn('BACK','battleScreen(1)')}`);return}let [a1,d1]=STYLES[s1],[a2,d2]=STYLES[s2];let p1=applyRoleBonus(calcAttack(c1[a1],c2[d1]),roleBonus(1,c1.id)),p2=applyRoleBonus(calcAttack(c2[a2],c1[d2]),roleBonus(2,c2.id));let before={hp:[...G.hp],shield:[...G.shield],temp:[...G.temp]};let r1=applyTeam(0,p2),r2=applyTeam(1,p1);G.used[0].add(c1.id);G.used[1].add(c2.id);G.round++;let report={round:G.round,level:G.level,c1,c2,s1,s2,p1,p2,r1,r2,before};G.history.push(report);if(G.hp[0]<=0||G.hp[1]<=0){G.finished=true;G.reason='KNOCKOUT'}else{while(G.level<=6&&([0,1].some(i=>!G.rosters[i].some(c=>c.level===G.level&&!G.used[i].has(c.id))))){if(G.level===6){G.finished=true;G.reason='ALL_ROUNDS_COMPLETE';break}G.level++}}reveal(report,0)}
-function fullStats(c){const groups=[['CORE','SPD','ACC','ADP','DUR'],['TAIJUTSU','T_ATK','T_DEF'],['KUNAI','K_ATK','K_DEF'],['SPECIAL','S_ATK','S_DEF'],['NINJUTSU','N_ATK','N_DEF'],['GENJUTSU','G_ATK','G_DEF']];return `<div class="full-stats">${groups.map(g=>{const keys=g.slice(1).filter(k=>Number.isFinite(Number(c[k])));return keys.length?`<div class="stat-group"><b>${g[0]}</b><div>${keys.map(k=>`<span>${k.replace('_',' ')} <strong>${fmt(c[k])}</strong></span>`).join('')}</div></div>`:''}).join('')}</div>`}
-function attackSummary(r,player){const own=player===1?r.c1:r.c2,opp=player===1?r.c2:r.c1,style=player===1?r.s1:r.s2,attack=player===1?r.p1:r.p2,[ak,dk]=STYLES[style];return `<div class="attackbox attack-${style.toLowerCase()}"><b>PLAYER ${player} • ${style.toUpperCase()} <span class="style-emblem">${style==='Taijutsu'?'👊':style==='Kunai'?'🗡️':style==='Special'?'💥':style==='Ninjutsu'?'🔥':'🌀'}</span></b><p>${own.name} ${ak.replace('_',' ')} <strong>${fmt(own[ak])}</strong></p><p>${opp.name} ${dk.replace('_',' ')} <strong>${fmt(opp[dk])}</strong></p><div class="impact-number">${attack.damage>0?`−${fmt(attack.damage)} DAMAGE`:`+${fmt(attack.shield_gain)} SHIELD`}</div>${attack.role_bonus?`<div class="role-bonus-breakdown">${attack.damage>0?'Attack damage':'Block shield'} multiplier: <b>×${fmt(attack.role_multiplier)}</b></div>`:''}</div>`}
-function historyScreen(backPlayer=1){const rounds=G.history.slice().reverse();page(`<div class="hero"><h2 class="gold">BATTLE ARCHIVE</h2><p class="muted">Every completed round • full 14-stat cards • attack calculations • HP, shield and temporary HP changes</p></div>${rounds.length?rounds.map(r=>`<details class="history-entry" open><summary><b>ROUND ${r.round} • ${levelName(r.level)}</b><span>${r.c1.name} vs ${r.c2.name}</span></summary><div class="fighter history-fighters"><div class="fighterbox"><img src="${portrait(r.c1)}"><b>${r.c1.name}</b><p class="muted">PLAYER 1 • ${r.s1}</p>${fullStats(r.c1)}</div><div class="fighterbox"><img src="${portrait(r.c2)}"><b>${r.c2.name}</b><p class="muted">PLAYER 2 • ${r.s2}</p>${fullStats(r.c2)}</div></div><div class="resultrow">${attackSummary(r,1)}${attackSummary(r,2)}</div><div class="panel"><b>TEAM STATUS • BEFORE → AFTER</b><div class="resultrow"><div><b>PLAYER 1</b><p>HP ${fmt(r.before.hp[0])} → ${fmt(r.r1.hp)}</p><p>Shield ${fmt(r.before.shield[0])} → ${fmt(r.r1.shield)}</p><p>Temp HP ${fmt(r.before.temp[0])} → ${fmt(r.r1.temp_hp)}</p><p>Damage taken ${fmt(r.r1.damage_taken)} • HP lost ${fmt(r.r1.hp_lost)}</p><p>Shield activations ${r.r1.activations}</p></div><div><b>PLAYER 2</b><p>HP ${fmt(r.before.hp[1])} → ${fmt(r.r2.hp)}</p><p>Shield ${fmt(r.before.shield[1])} → ${fmt(r.r2.shield)}</p><p>Temp HP ${fmt(r.before.temp[1])} → ${fmt(r.r2.temp_hp)}</p><p>Damage taken ${fmt(r.r2.damage_taken)} • HP lost ${fmt(r.r2.hp_lost)}</p><p>Shield activations ${r.r2.activations}</p></div></div></div></details>`).join(''):'<div class="panel center">No completed battles yet. Your round records will appear here.</div>'}${btn('BACK TO MY BATTLE SCREEN',`battleScreen(${backPlayer},false)`,'primary')}${G.finished?btn('MATCH RESULT','endScreen()'):''}`)}
-function styleIcon(s){return ({Taijutsu:'👊',Kunai:'🗡️',Special:'💥',Ninjutsu:'🔥',Genjutsu:'🌀'})[s]||'⚔️'}function effectName(s){return ({Taijutsu:'IMPACT STRIKE • close-combat shockwave',Kunai:'BLADE FLASH • cutting slash trail',Special:'SIGNATURE BLAST • explosive burst',Ninjutsu:'CHAKRA RELEASE • elemental wave',Genjutsu:'ILLUSION FIELD • distortion ripple'})[s]||'ATTACK'}function deltaBadge(r){return r.hp_lost>0?`<span class="damage-pop">❤️ −${fmt(r.hp_lost)} HP</span>`:r.temp_absorbed>0?`<span class="damage-pop">🛡 −${fmt(r.temp_absorbed)} TEMP</span>`:`<span class="safe-pop">NO HP DAMAGE</span>`}function shieldBadge(r){return r.shield_gain>0||r.activations>0?`<span class="shield-pop">🔷 +${fmt(r.shield_gain)} SHIELD ${r.activations?`• ${r.activations} ACTIVATION`:''}</span>`:r.hp_restored>0?`<span class="shield-pop">✨ +${fmt(r.hp_restored)} HP RESTORED</span>`:''}function damageShieldText(r){return `<span class="damage-pop">💥 P1 −${fmt(r.r1.hp_lost)} HP</span><span class="shield-pop">🔷 P1 shield ${fmt(r.r1.shield)} • P2 −${fmt(r.r2.hp_lost)} HP • shield ${fmt(r.r2.shield)}</span>`}
-function targetImpact(r,phase){
- if(phase!==1&&phase!==2)return '';
- const attack=phase===1?r.p1:r.p2, side=phase===1?'right':'left', style=phase===1?r.s1:r.s2;
- const target=attack.damage>0?'<div class="target-mark damage-mark">✕<small>HIT!</small></div>':attack.shield_gain>0?'<div class="target-mark shield-mark">🛡<small>BLOCK!</small></div>':'<div class="target-mark block-mark">〰<small>NO HIT</small></div>';
- return `<div class="travel-effect travel-${side} travel-${style.toLowerCase()}">${styleIcon(style)}</div><div class="${side==='right'?'fighter-right':'fighter-left'}-impact">${target}</div>`;
+
+function computeTierAverages(cards) {
+  const avgs = {};
+  for (const l of LEVELS) {
+    const list = cards.filter((c) => Number(c.level) === l);
+    avgs[l] = {};
+    for (const k of STAT_KEYS) {
+      const sum = list.reduce((acc, c) => acc + Number(c[k] || 0), 0);
+      avgs[l][k] = list.length ? sum / list.length : 0;
+    }
+  }
+  return avgs;
 }
-function reveal(r,phase){let title=['THE CLASH BEGINS','PLAYER 1 ATTACK!','PLAYER 2 ATTACK!','DAMAGE!'][phase];let left=r.c1,right=r.c2;page(`<div class="arena arena-phase-${phase}"><div class="battle-flash flash-phase-${phase} ${phase===1?'flash-'+r.s1.toLowerCase():phase===2?'flash-'+r.s2.toLowerCase():phase===3?'flash-damage':''}" aria-hidden="true"></div><div class="hero"><h2 class="gold">${title}</h2><small>ROUND ${r.round} • ${levelName(r.level)}</small><div class="fighter"><div class="fighterbox fighter-left"><img src="${portrait(left)}"><b>${left.name}</b><p class="muted">PLAYER 1 • ${r.s1}</p>${fullStats(left)}</div><div class="fighterbox fighter-right"><img src="${portrait(right)}"><b>${right.name}</b><p class="muted">PLAYER 2 • ${r.s2}</p>${fullStats(right)}</div>${targetImpact(r,phase)}</div></div><div class="impact-banner ${phase===1?'style-'+r.s1.toLowerCase():phase===2?'style-'+r.s2.toLowerCase():phase===3?'damage-stage':''}">${phase===0?'⚔ BOTH FIGHTERS COMMITTED':phase===1?`${styleIcon(r.s1)} PLAYER 1 • ${r.s1.toUpperCase()} ATTACK`:phase===2?`${styleIcon(r.s2)} PLAYER 2 • ${r.s2.toUpperCase()} ATTACK`:'💥 DAMAGE & SHIELD RESOLUTION'}</div><div class="combat-fx ${phase===1?'fx-'+r.s1.toLowerCase():phase===2?'fx-'+r.s2.toLowerCase():phase===3?'fx-damage-shield':''}">${phase===1?effectName(r.s1):phase===2?effectName(r.s2):phase===3?damageShieldText(r):'⚔ VS ⚔'}</div><div class="panel center"><p class="muted">Both attacks were calculated from the same pre-round state. Animation order does not change combat results.</p></div>${phase>=1?`<div class="resultrow">${attackSummary(r,1)}${attackSummary(r,2)}</div>`:''}${phase===3?`<div class="panel"><h3 class="gold">ROUND RESULT • TEAM STATUS</h3><div class="resultrow"><div><b>PLAYER 1</b>${bar('HP',G.hp[0],10,'#22c55e')}${bar('SHIELD',G.shield[0],2,'#3b82f6')}${bar('TEMP HP',G.temp[0],.5,'#a855f7')}<div class="battle-deltas">${deltaBadge(r.r1)}${shieldBadge(r.r1)}</div><small>Damage taken ${fmt(r.r1.damage_taken)} • HP lost ${fmt(r.r1.hp_lost)} • Shield gained ${fmt(r.r1.shield_gain)}</small></div><div><b>PLAYER 2</b>${bar('HP',G.hp[1],10,'#22c55e')}${bar('SHIELD',G.shield[1],2,'#3b82f6')}${bar('TEMP HP',G.temp[1],.5,'#a855f7')}<div class="battle-deltas">${deltaBadge(r.r2)}${shieldBadge(r.r2)}</div><small>Damage taken ${fmt(r.r2.damage_taken)} • HP lost ${fmt(r.r2.hp_lost)} • Shield gained ${fmt(r.r2.shield_gain)}</small></div></div></div>${btn(G.finished?'VIEW MATCH RESULT':`NEXT ROUND • ${levelName(G.level)}`,G.finished?'endScreen()':'nextRound()','primary')}${btn(`BATTLE HISTORY (${G.history.length})`,`historyScreen(1)`,'blue')}`:''}</div>`);if(phase<3)setTimeout(()=>reveal(r,phase+1),phase===0?1800:phase===1?2800:phase===2?2800:2600)}
-function nextRound(){G.pick=['',''];G.style=['',''];battleScreen(1)}function endScreen(){let winner= Math.abs(G.hp[0]-G.hp[1])<=.0001?0:G.hp[0]>G.hp[1]?1:2;page(`<div class="hero"><h1 class="gold">MATCH COMPLETE</h1><h2>${winner===0?'DRAW':`PLAYER ${winner} WINS`}</h2><p class="muted">${G.reason==='KNOCKOUT'?'KNOCKOUT':'ALL ROUNDS COMPLETE'} • ${G.round} ROUNDS</p></div><div class="resultrow"><div class="panel"><b>PLAYER 1</b>${bar('HP',G.hp[0],10,'#22c55e')}<p>Shield ${fmt(G.shield[0])}</p><p>Temp HP ${fmt(G.temp[0])}</p></div><div class="panel"><b>PLAYER 2</b>${bar('HP',G.hp[1],10,'#22c55e')}<p>Shield ${fmt(G.shield[1])}</p><p>Temp HP ${fmt(G.temp[1])}</p></div></div><h3 class="gold">BATTLE HISTORY</h3>${G.history.map(r=>`<div class="panel"><b>Round ${r.round} • ${levelName(r.level)}</b><p>${r.c1.name} (${r.s1}) vs ${r.c2.name} (${r.s2})</p><small>P1 dealt ${fmt(r.p1.damage)} damage • P2 dealt ${fmt(r.p2.damage)} damage</small></div>`).join('')}${btn('NEW MATCH','menu()','primary')}`)}
-window.menu=menu;window.difficulty=difficulty;window.start=start;window.draftSetupScreen=draftSetupScreen;window.draftAuditScreen=draftAuditScreen;window.setDraftPreset=setDraftPreset;window.setDraftMode=setDraftMode;window.setPoolSize=setPoolSize;window.generateDraft=generateDraft;window.setRole=setRole;window.confirmTeam=confirmTeam;window.battleScreen=battleScreen;window.pickCard=pickCard;window.pickStyle=pickStyle;window.statusScreen=statusScreen;window.activateShield=activateShield;window.lockBattle=lockBattle;window.nextRound=nextRound;window.endScreen=endScreen;window.historyScreen=historyScreen;
-DBPromise.then(cards=>{db=cards;if(db.length!==120)throw Error('Expected 120 cards, got '+db.length);menu()}).catch(e=>page(`<h2 class="danger">DATABASE ERROR</h2><p>${e.message}</p>`));
+
+function formatStatSignal(val, level, statKey) {
+  const num = Number(val || 0);
+  const avg = tierAverages[level]?.[statKey];
+  if (typeof avg !== "number") return `<b>${fmt(num)}</b>`;
+  const diff = num - avg;
+  let cls = "mid";
+  let arrowCls = "sig-mid";
+  let symbol = "•";
+
+  if (diff >= 0.4) {
+    cls = "star";
+    arrowCls = "sig-star";
+    symbol = "▲";
+  } else if (diff > 0.05) {
+    cls = "high";
+    arrowCls = "sig-high";
+    symbol = "▲";
+  } else if (diff < -0.05) {
+    cls = "low";
+    arrowCls = "sig-low";
+    symbol = "▼";
+  }
+
+  const sign = diff >= 0 ? `+${diff.toFixed(2)}` : diff.toFixed(2);
+  const tip = `${fmt(num)} vs ${levelName(level)} avg ${fmt(avg)} (${sign})`;
+  return `<span class="stat-val ${cls}" title="${tip}">${fmt(num)}<span class="sig-arrow ${arrowCls}">${symbol}</span></span>`;
+}
+
+function renderPresetSummary() {
+  const key = $("presetSelect").value;
+  const p = MATCH_PRESETS[key];
+  $("presetSummary").innerHTML = `
+    <strong>${p.label}:</strong> ${p.perPlayer} cards/team
+    (${LEVELS.map((l) => `${levelName(l)}: ${p.distribution[l]}`).join(", ")}) ·
+    <strong>Team HP:</strong> 10.00 HP ·
+    <strong>Manual Shield (at 2.00):</strong> Restore up to +1.125 HP &amp; +0.50 Temp HP ·
+    <strong>Captain / Vice:</strong> 1.8× / 1.4× ATK &amp; Block Shield
+  `;
+}
+
+async function initDatabase() {
+  try {
+    const resp = await fetch("./cards.json");
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} while loading cards.json`);
+    const raw = await resp.json();
+    if (!Array.isArray(raw) || raw.length !== 120) {
+      throw new Error(`Expected 120 cards in cards.json, got ${raw?.length || 0}`);
+    }
+    db = raw;
+    tierAverages = computeTierAverages(db);
+  } catch (err) {
+    $("loadError").classList.remove("hidden");
+    $("loadError").textContent = `Could not load cards.json: ${err.message}`;
+    $("btnDraftTeams").disabled = true;
+  }
+}
+
+function renderCardMarkup(card, { badgeHtml = "", extraClass = "", footerHtml = "", selectedRibbon = false, popupHtml = "" } = {}) {
+  const lvl = Number(card.level);
+  const s = (k) => formatStatSignal(card[k], lvl, k);
+  const fallbackSvg = `data:image/svg+xml;utf8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="100%" height="100%" fill="#0f172a"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" fill="#fbbf24" font-family="sans-serif" font-weight="800" font-size="14">${card.id}</text></svg>`
+  )}`;
+
+  return `
+    <div class="game-card ${extraClass}" data-id="${card.id}">
+      ${selectedRibbon ? '<div class="selected-ribbon">✓ SELECTED</div>' : ""}
+      ${popupHtml}
+      <div class="card-top-row">
+        <img class="card-portrait" src="${portraitSrc(card)}" alt="${card.name}" onerror="this.onerror=null;this.src='${fallbackSvg}'" />
+        <div class="card-header-info">
+          <div class="card-title">${card.name}${badgeHtml}</div>
+          <div class="card-meta">${card.id} · ${levelName(lvl)}</div>
+        </div>
+      </div>
+      <div class="style-grid">
+        <div class="style-cell"><span class="st-name">TAI</span><span>${s("T_ATK")} / ${s("T_DEF")}</span></div>
+        <div class="style-cell"><span class="st-name">NIN</span><span>${s("N_ATK")} / ${s("N_DEF")}</span></div>
+        <div class="style-cell"><span class="st-name">GEN</span><span>${s("G_ATK")} / ${s("G_DEF")}</span></div>
+        <div class="style-cell"><span class="st-name">KUN</span><span>${s("K_ATK")} / ${s("K_DEF")}</span></div>
+        <div class="style-cell" style="grid-column:span 2"><span class="st-name">SPC</span><span>${s("S_ATK")} / ${s("S_DEF")}</span></div>
+      </div>
+      ${footerHtml}
+    </div>
+  `;
+}
+
+// ============================================================================
+// 5-PHASE SELECTION ALGORITHM (from 120-card Nweb098 build)
+// ============================================================================
+function average(a) {
+  return a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
+}
+function styleStats(c) {
+  return Object.entries(ATTACK_FIELDS).map(([style, key]) => ({ style, key, value: Number(c[key]) || 0 }));
+}
+function cardMeta(c, tierCards) {
+  const styles = styleStats(c);
+  const vals = styles.map((x) => x.value);
+  const means = Object.keys(ATTACK_FIELDS).map((k) => average(tierCards.map((x) => Number(x[ATTACK_FIELDS[k]]) || 0)));
+  const density = styles.filter((x, i) => x.value >= means[i]).length;
+  const avg = average(vals);
+  const floor = Math.min(...vals);
+  return { avg, floor, density, styles };
+}
+function rankByStyle(tierCards, style, descending = true) {
+  const key = ATTACK_FIELDS[style];
+  return [...tierCards].sort((a, b) =>
+    descending ? Number(b[key]) - Number(a[key]) || a.id.localeCompare(b.id) : Number(a[key]) - Number(b[key]) || a.id.localeCompare(b.id)
+  );
+}
+function rankComposite(tierCards, descending = true) {
+  const metas = new Map(tierCards.map((c) => [c.id, cardMeta(c, tierCards)]));
+  return [...tierCards].sort((a, b) => {
+    const A = metas.get(a.id);
+    const B = metas.get(b.id);
+    const scoreA = A.avg * 0.7 + A.floor * 0.2 + A.density * 0.1;
+    const scoreB = B.avg * 0.7 + B.floor * 0.2 + B.density * 0.1;
+    return (descending ? -1 : 1) * (scoreA - scoreB) || a.id.localeCompare(b.id);
+  });
+}
+function buildTierCandidatePool(tier, mode, poolSize) {
+  const cards = tier.map((c) => ({ ...c }));
+  const target = poolSize;
+  const selected = [];
+  const selectedIds = new Set();
+  const holds = [];
+  const container = [];
+
+  if (mode === "Random") {
+    const randomPool = shuffle(cards).slice(0, target);
+    const counts = { high: 0, medium: 0, low: 0 };
+    for (const c of cards) {
+      const d = cardMeta(c, cards).density;
+      counts[d >= 4 ? "high" : d >= 2 ? "medium" : "low"]++;
+    }
+    return { cards: randomPool, styles: [], density: counts };
+  }
+
+  const add = (c, stage) => {
+    if (c && !selectedIds.has(c.id) && selected.length < target) {
+      selectedIds.add(c.id);
+      selected.push({ card: c, stage });
+      return true;
+    }
+    return false;
+  };
+  const addHold = (c, reason) => {
+    if (c && !selectedIds.has(c.id) && !holds.some((x) => x.card.id === c.id)) holds.push({ card: c, reason });
+  };
+  const chosenStyles = mode === "Balanced Meta" ? Object.keys(ATTACK_FIELDS) : shuffle(Object.keys(ATTACK_FIELDS)).slice(0, 3);
+  const direction = mode !== "Weakest Meta";
+  const styleRanks = {};
+  for (const style of Object.keys(ATTACK_FIELDS)) styleRanks[style] = rankByStyle(cards, style, true);
+
+  for (const style of chosenStyles) {
+    const rank = rankByStyle(cards, style, direction);
+    let found = 0;
+    for (const c of rank.slice(0, 5)) {
+      if (found < 2) {
+        if (add(c, `P1 · ${style}`)) found++;
+        else addHold(c, `P1 hold · ${style}`);
+      } else addHold(c, `P1 reserve · ${style}`);
+    }
+  }
+
+  const holdsSorted = holds.slice().sort((a, b) => {
+    const A = cardMeta(a.card, cards);
+    const B = cardMeta(b.card, cards);
+    return (direction ? -1 : 1) * (A.avg - B.avg);
+  });
+  for (const h of holdsSorted) {
+    if (selected.length >= Math.min(10, target)) break;
+    add(h.card, "P2 · Hold");
+  }
+  const comp = rankComposite(cards, direction);
+  for (const c of comp) {
+    if (selected.length >= Math.min(10, target)) break;
+    if (!selectedIds.has(c.id)) container.push(c);
+  }
+  for (const c of container) add(c, "P2 · Container");
+
+  const meta = new Map(cards.map((c) => [c.id, cardMeta(c, cards)]));
+  const densityGroups = { high: [], medium: [], low: [] };
+  for (const c of cards) {
+    const d = meta.get(c.id).density;
+    (d >= 4 ? densityGroups.high : d >= 2 ? densityGroups.medium : densityGroups.low).push(c);
+  }
+  for (const group of Object.values(densityGroups)) group.sort((a, b) => (direction ? -1 : 1) * (meta.get(a.id).avg - meta.get(b.id).avg));
+  const densityOrder = mode === "Weakest Meta" ? ["low", "medium", "high"] : ["high", "medium", "low"];
+  let cursor = 0;
+  while (selected.length < Math.min(13, target)) {
+    let moved = false;
+    for (const key of densityOrder) {
+      const c = densityGroups[key].find((x) => !selectedIds.has(x.id));
+      if (c) {
+        add(c, `P3 · ${key}`);
+        moved = true;
+        if (selected.length >= Math.min(13, target)) break;
+      }
+    }
+    if (!moved) break;
+    cursor++;
+    if (cursor > cards.length) break;
+  }
+
+  const bonusRank = cards
+    .map((c) => {
+      const m = meta.get(c.id);
+      const styleRankSum = Object.keys(ATTACK_FIELDS).reduce((sum, style) => {
+        const r = styleRanks[style].findIndex((x) => x.id === c.id);
+        return sum + (r < 0 ? cards.length : r);
+      }, 0);
+      return { c, score: (direction ? 1 : -1) * (m.avg * 0.55 + m.floor * 0.25 + m.density * 0.12 + (1 - styleRankSum / (cards.length * 5)) * 0.08) };
+    })
+    .sort((a, b) => b.score - a.score);
+  for (const x of bonusRank) {
+    if (selected.length >= target) break;
+    add(x.c, "P4 · Bonus");
+  }
+  if (selected.length < target) {
+    const fill = mode === "Random" ? shuffle(cards) : rankComposite(cards, direction);
+    for (const c of fill) {
+      if (selected.length >= target) break;
+      add(c, "P5 · Fill");
+    }
+  }
+  const final = shuffle(selected.map((x) => ({ ...x.card })).slice(0, target));
+  return {
+    cards: final,
+    styles: chosenStyles,
+    density: { high: densityGroups.high.length, medium: densityGroups.medium.length, low: densityGroups.low.length },
+  };
+}
+
+function generateTeamsForMatch(presetKey, mode) {
+  const preset = MATCH_PRESETS[presetKey];
+  const cardsA = [];
+  const cardsB = [];
+  const audit = [];
+  for (const l of LEVELS) {
+    const tier = db.filter((c) => Number(c.level) === l);
+    const tierPoolSize = 15 + Math.floor(Math.random() * 2);
+    const built = buildTierCandidatePool(tier, mode, tierPoolSize);
+    const need = preset.distribution[l] * 2;
+    const stack = shuffle(built.cards).slice(0, need);
+    for (let k = 0; k < preset.distribution[l]; k++) {
+      cardsA.push(stack.shift());
+      cardsB.push(stack.shift());
+    }
+    audit.push({
+      level: l,
+      pool: built.cards.length,
+      styles: built.styles,
+      need,
+      density: built.density,
+      poolCards: built.cards.map((c) => ({ id: c.id, name: c.name })),
+    });
+  }
+  return { cardsA, cardsB, audit };
+}
+
+// ============================================================================
+// ONLINE MULTIPLAYER SNAPSHOT, RESUME & SYNC (identical to N13_firebase)
+// ============================================================================
+function snapshotMatchState() {
+  const { history, ...rest } = matchState;
+  return JSON.parse(JSON.stringify(rest));
+}
+
+function restoreMatchState(snap) {
+  return { ...snap, history: [] };
+}
+
+function persistOnlineState() {
+  if (!isOnline() || roomClient.role !== "HOST" || !matchState) return;
+  if (matchState.status === "FINISHED") {
+    roomClient.clearState?.();
+  } else {
+    roomClient.saveState?.(snapshotMatchState());
+  }
+}
+
+function sendResync() {
+  if (roomClient.role !== "HOST" || !matchState) return;
+  roomClient.send({
+    type: "RESYNC_STATE",
+    state: snapshotMatchState(),
+    remoteLocked: Boolean(remoteMoveBuffer),
+  });
+}
+
+function handleResync(msg) {
+  const snap = msg.state;
+  const upToDate = matchState && matchState.round === snap.round && matchState.status === snap.status;
+  if (upToDate) {
+    if (msg.remoteLocked && !myMoveLockedOnline && snap.status === "IN_PROGRESS") {
+      myMoveLockedOnline = true;
+      $("turnControls").classList.add("hidden");
+      $("turnCurtain").classList.remove("hidden");
+      $("btnRevealTurn").classList.add("hidden");
+      $("turnCurtainTitle").textContent = "Move Locked Privately!";
+      $("turnCurtainSub").textContent = "Reconnected. Waiting for the clash to resolve...";
+    }
+    return;
+  }
+  matchState = restoreMatchState(snap);
+  lastAppliedOnlineRound = snap.round;
+  myMoveLockedOnline = false;
+  selectedCardId = null;
+  showScreen("screenArena");
+  updateHud();
+  if (snap.status === "FINISHED") {
+    advanceTurn();
+    return;
+  }
+  prepareOnlineTurnUi();
+  if (msg.remoteLocked) {
+    myMoveLockedOnline = true;
+    $("turnControls").classList.add("hidden");
+    $("btnRevealTurn").classList.add("hidden");
+    $("turnCurtainTitle").textContent = "Move Locked Privately!";
+    $("turnCurtainSub").textContent = "Reconnected. Waiting for the clash to resolve...";
+  }
+  renderHistoryLog();
+}
+
+async function offerHostResume() {
+  const saved = await roomClient.loadState?.();
+  if (!saved || saved.status !== "IN_PROGRESS") return false;
+  const where = `Round ${saved.round + 1}, ${saved.players?.A?.name ?? "A"} vs ${saved.players?.B?.name ?? "B"}`;
+  if (!confirm(`A saved match was found in this room (${where}).
+
+OK = resume it
+Cancel = start fresh`)) {
+    await roomClient.clearState?.();
+    return false;
+  }
+  matchState = restoreMatchState(saved);
+  lockedMoveA = null;
+  remoteMoveBuffer = null;
+  myMoveLockedOnline = false;
+  selectedCardId = null;
+  showScreen("screenArena");
+  updateHud();
+  prepareOnlineTurnUi();
+  renderHistoryLog();
+  if (roomClient.connected) sendResync();
+  return true;
+}
+
+function setRoomStatus(text, ok = false) {
+  const el = $("roomConnStatus");
+  el.textContent = text;
+  el.style.background = ok ? "#065f46" : "#243656";
+  el.style.color = ok ? "#a7f3d0" : "#edf2ff";
+}
+
+function updateRoomHeaderBadge() {
+  const badge = $("roomHeaderBadge");
+  if (isOnline() && roomClient.roomCode) {
+    badge.classList.remove("hidden");
+    badge.textContent = `ROOM: ${roomClient.roomCode} (${roomClient.role || "PEER"})`;
+  } else {
+    badge.classList.add("hidden");
+  }
+}
+
+async function handleCreateRoom() {
+  const custom = $("roomCodeInput").value.trim().toUpperCase();
+  $("btnCreateRoom").disabled = true;
+  setRoomStatus("Creating Room...");
+  try {
+    const code = await roomClient.createRoom(custom || null);
+    $("roomCodeInput").value = code;
+    updateRoomHeaderBadge();
+    setRoomStatus(`HOST · Code: ${code}`, true);
+    $("roomLobbyInfo").innerHTML =
+      `Room <strong class="gold-text">${code}</strong> created! Share this code with Player 2, or click <b>Draft Teams</b> once they join.`;
+    roomClient.send({
+      type: "HELLO_HOST",
+      hostName: $("playerAName").value.trim() || "Player 1",
+    });
+    await offerHostResume();
+  } catch (err) {
+    setRoomStatus("Room Error");
+    $("roomLobbyInfo").textContent = err.message;
+  } finally {
+    $("btnCreateRoom").disabled = false;
+  }
+}
+
+async function handleJoinRoom() {
+  const code = $("roomCodeInput").value.trim().toUpperCase();
+  if (!code) {
+    $("roomLobbyInfo").textContent = "Enter the 6-letter Room Code from Player 1 first.";
+    return;
+  }
+  $("btnJoinRoom").disabled = true;
+  setRoomStatus("Joining...");
+  try {
+    await roomClient.joinRoom(code);
+    updateRoomHeaderBadge();
+    setRoomStatus(`GUEST · Code: ${code}`, true);
+    $("roomLobbyInfo").innerHTML =
+      `Joined room <strong class="blue-text">${code}</strong>! Waiting for Host to draft teams &amp; send rosters...`;
+    roomClient.send({
+      type: "HELLO_GUEST",
+      guestName: $("playerBName").value.trim() || "Player 2",
+    });
+  } catch (err) {
+    setRoomStatus("Join Failed");
+    $("roomLobbyInfo").textContent = err.message;
+  } finally {
+    $("btnJoinRoom").disabled = false;
+  }
+}
+
+roomClient.on("peer_connected", ({ transport }) => {
+  setRoomStatus(`CONNECTED (${roomClient.role} · ${transport})`, true);
+  updateRoomHeaderBadge();
+  if (roomClient.role === "HOST") {
+    $("roomLobbyInfo").innerHTML =
+      `Opponent <strong>${$("playerBName").value.trim() || "Player 2"}</strong> connected! Click <b>Draft Teams &amp; Assign Leaders</b> to begin.`;
+    roomClient.send({
+      type: "HELLO_HOST",
+      hostName: $("playerAName").value.trim() || "Player 1",
+    });
+    if (matchState && matchState.status === "IN_PROGRESS") sendResync();
+  } else {
+    $("roomLobbyInfo").innerHTML =
+      `Connected to Host <strong>${$("playerAName").value.trim() || "Player 1"}</strong>! Waiting for Host to click Draft Teams...`;
+    roomClient.send({
+      type: "HELLO_GUEST",
+      guestName: $("playerBName").value.trim() || "Player 2",
+    });
+  }
+});
+
+roomClient.on("error", ({ message }) => {
+  setRoomStatus("Room Error");
+  $("roomLobbyInfo").textContent = message;
+});
+
+roomClient.on("peer_disconnected", () => {
+  setRoomStatus("Peer Disconnected");
+});
+
+roomClient.on("message", (msg) => {
+  if (!msg || !msg.type) return;
+
+  if (msg.type === "HELLO_GUEST" && roomClient.role === "HOST") {
+    if (msg.guestName) $("playerBName").value = msg.guestName;
+    setRoomStatus(`CONNECTED (HOST · ${roomClient.roomCode})`, true);
+    $("roomLobbyInfo").innerHTML =
+      `Opponent <strong>${msg.guestName || "Player 2"}</strong> connected! Click <b>Draft Teams &amp; Assign Leaders</b> to begin.`;
+  } else if (msg.type === "HELLO_HOST" && roomClient.role === "GUEST") {
+    if (msg.hostName) $("playerAName").value = msg.hostName;
+    setRoomStatus(`CONNECTED (GUEST · ${roomClient.roomCode})`, true);
+    $("roomLobbyInfo").innerHTML =
+      `Connected to Host <strong>${msg.hostName || "Player 1"}</strong>! Waiting for draft...`;
+  } else if (msg.type === "TEAM_DRAFT_SYNC" && roomClient.role === "GUEST") {
+    draftedTeams = {
+      presetKey: msg.presetKey,
+      mode: msg.mode,
+      nameA: msg.nameA,
+      nameB: msg.nameB,
+      cardsA: msg.cardsA,
+      cardsB: msg.cardsB,
+      audit: msg.audit || [],
+    };
+    tempCapB = null;
+    tempVcB = null;
+    $("curtainLeaderTitle").textContent = `Ready, ${draftedTeams.nameB}?`;
+    $("curtainLeaderSub").textContent =
+      `Host drafted ${draftedTeams.cardsB.length} cards for your team. Pick your Captain (1.8×) and Vice-Captain (1.4×).`;
+    $("btnRevealLeaders").classList.remove("hidden");
+    showScreen("screenLeaders");
+    $("leaderCurtain").classList.remove("hidden");
+    $("leaderPickerContent").classList.add("hidden");
+  } else if (msg.type === "GUEST_LEADERS_LOCKED" && roomClient.role === "HOST") {
+    tempCapB = msg.captainId;
+    tempVcB = msg.viceCaptainId;
+    if (draftedTeams && tempCapA && tempVcA) {
+      startOnlineMatchAsHost();
+    }
+  } else if (msg.type === "START_ONLINE_MATCH" && roomClient.role === "GUEST") {
+    matchState = createNewMatchState({
+      presetKey: msg.presetKey,
+      teamA: msg.teamA,
+      teamB: msg.teamB,
+    });
+    myMoveLockedOnline = false;
+    lastAppliedOnlineRound = 0;
+    selectedCardId = null;
+    showScreen("screenArena");
+    updateHud();
+    prepareOnlineTurnUi();
+  } else if (msg.type === "GUEST_MOVE_LOCKED" && roomClient.role === "HOST") {
+    if (!matchState || remoteMoveBuffer) return;
+    if (msg.round !== undefined && msg.round !== matchState.round) return;
+    remoteMoveBuffer = msg.move;
+    if (myMoveLockedOnline && matchState.status === "IN_PROGRESS") {
+      resolveOnlineTurnOnHost();
+    } else {
+      $("turnCurtainSub").textContent = `${matchState.players.B.name} locked their move! Now lock your move to resolve.`;
+    }
+  } else if (msg.type === "HOST_ROUND_RESOLVED" && roomClient.role === "GUEST") {
+    const rec = msg.record;
+    if (rec.round <= lastAppliedOnlineRound) return;
+    lastAppliedOnlineRound = rec.round;
+    matchState.round = msg.stateAfter.round;
+    matchState.level = msg.stateAfter.level;
+    matchState.status = msg.stateAfter.status;
+    matchState.winner = msg.stateAfter.winner;
+    matchState.reason = msg.stateAfter.reason;
+    matchState.players.A = msg.stateAfter.players.A;
+    matchState.players.B = msg.stateAfter.players.B;
+    matchState.history.push(rec);
+
+    myMoveLockedOnline = false;
+    selectedCardId = null;
+    runAnimatedBattleSimulation(rec);
+  } else if (msg.type === "RESYNC_STATE" && roomClient.role === "GUEST") {
+    handleResync(msg);
+  } else if (msg.type === "SHIELD_SYNC") {
+    if (!matchState) return;
+    const ev = msg.event;
+    const p = matchState.players[ev.playerSide];
+    p.shields = ev.remainingShields;
+    p.hp = ev.hp;
+    p.extraArmorHp = ev.extraArmorHp;
+    matchState.history.push(ev);
+    persistOnlineState();
+    updateHud();
+    renderHistoryLog();
+  }
+});
+
+// ============================================================================
+// MATCH ENGINE (Preserves exact 120-card rules: 10 HP, 2.00 Shield, 1.8x/1.4x)
+// ============================================================================
+function createNewMatchState({ presetKey, teamA, teamB }) {
+  return {
+    presetKey,
+    round: 0,
+    level: 1,
+    status: "IN_PROGRESS",
+    winner: null,
+    reason: "",
+    history: [],
+    players: {
+      A: {
+        name: teamA.name,
+        roster: teamA.cards,
+        captainId: teamA.captainId,
+        viceCaptainId: teamA.viceCaptainId,
+        hp: 10,
+        maxHp: 10,
+        shields: 0,
+        extraArmorHp: 0,
+        usedCardIds: [],
+      },
+      B: {
+        name: teamB.name,
+        roster: teamB.cards,
+        captainId: teamB.captainId,
+        viceCaptainId: teamB.viceCaptainId,
+        hp: 10,
+        maxHp: 10,
+        shields: 0,
+        extraArmorHp: 0,
+        usedCardIds: [],
+      },
+    },
+  };
+}
+
+function calcRawAttack(atk, def) {
+  return atk - def > 0.0001
+    ? { damage: +(atk - def).toFixed(6), shield_gain: 0 }
+    : { damage: 0, shield_gain: +Math.max(def - atk, 0).toFixed(6) };
+}
+
+function applyRoleMultiplier(raw, mult, roleLabel) {
+  if (mult === 1) {
+    return { ...raw, roleBonus: "NONE", roleMult: 1, baseDamage: raw.damage, baseShield: raw.shield_gain };
+  }
+  if (raw.damage > 0) {
+    return {
+      ...raw,
+      damage: +(raw.damage * mult).toFixed(6),
+      roleBonus: `${roleLabel} (${mult}× DMG)`,
+      roleMult: mult,
+      baseDamage: raw.damage,
+      baseShield: raw.shield_gain,
+    };
+  }
+  const baseBlock = raw.shield_gain > 0 ? raw.shield_gain : 1;
+  return {
+    ...raw,
+    shield_gain: +(baseBlock * mult).toFixed(6),
+    roleBonus: `${roleLabel} (${mult}× SHIELD)`,
+    roleMult: mult,
+    baseDamage: raw.damage,
+    baseShield: baseBlock,
+  };
+}
+
+function applyDamageToPlayer(player, incomingDamage) {
+  let hp = player.hp;
+  let tmp = player.extraArmorHp;
+  const absorbed = Math.min(incomingDamage, tmp);
+  tmp -= absorbed;
+  const lost = Math.min(incomingDamage - absorbed, hp);
+  hp -= lost;
+  player.hp = +hp.toFixed(6);
+  player.extraArmorHp = +tmp.toFixed(6);
+  return { absorbed: +absorbed.toFixed(6), hpLost: +lost.toFixed(6) };
+}
+
+function executeTurnClash(state, { moveA, moveB }) {
+  const pA = state.players.A;
+  const pB = state.players.B;
+  const cA = pA.roster.find((c) => c.id === moveA.cardId);
+  const cB = pB.roster.find((c) => c.id === moveB.cardId);
+  const stA = STYLES[moveA.style];
+  const stB = STYLES[moveB.style];
+
+  const multA = cA.id === pA.captainId ? 1.8 : cA.id === pA.viceCaptainId ? 1.4 : 1;
+  const labelA = cA.id === pA.captainId ? "CAPTAIN" : cA.id === pA.viceCaptainId ? "VICE_CAP" : "NONE";
+  const multB = cB.id === pB.captainId ? 1.8 : cB.id === pB.viceCaptainId ? "1.4" : 1;
+  const numMultB = Number(multB);
+  const labelB = cB.id === pB.captainId ? "CAPTAIN" : cB.id === pB.viceCaptainId ? "VICE_CAP" : "NONE";
+
+  const atkA = Number(cA[stA.atk]);
+  const defB = Number(cB[stA.def]);
+  const resAtoB = applyRoleMultiplier(calcRawAttack(atkA, defB), multA, labelA);
+
+  const atkB = Number(cB[stB.atk]);
+  const defA = Number(cA[stB.def]);
+  const resBtoA = applyRoleMultiplier(calcRawAttack(atkB, defA), numMultB, labelB);
+
+  const dmgAppliedToB = applyDamageToPlayer(pB, resAtoB.damage);
+  const dmgAppliedToA = applyDamageToPlayer(pA, resBtoA.damage);
+
+  // Shield gained by defender when blocking opponent's attack
+  pB.shields = +(pB.shields + resAtoB.shield_gain).toFixed(6);
+  pA.shields = +(pA.shields + resBtoA.shield_gain).toFixed(6);
+
+  pA.usedCardIds.push(cA.id);
+  pB.usedCardIds.push(cB.id);
+  state.round += 1;
+
+  const playedLevel = state.level;
+  if (pA.hp <= 0 || pB.hp <= 0) {
+    state.status = "FINISHED";
+    state.reason = "KNOCKOUT";
+    if (pA.hp <= 0 && pB.hp <= 0) state.winner = "DRAW";
+    else if (pB.hp <= 0) state.winner = "A";
+    else state.winner = "B";
+  } else {
+    while (
+      state.level <= 6 &&
+      ["A", "B"].some((side) => !state.players[side].roster.some((c) => Number(c.level) === state.level && !state.players[side].usedCardIds.includes(c.id)))
+    ) {
+      if (state.level === 6) {
+        state.status = "FINISHED";
+        state.reason = "ALL_ROUNDS_COMPLETE";
+        if (Math.abs(pA.hp - pB.hp) <= 0.0001) state.winner = "DRAW";
+        else state.winner = pA.hp > pB.hp ? "A" : "B";
+        break;
+      }
+      state.level += 1;
+    }
+  }
+
+  const record = {
+    round: state.round,
+    level: playedLevel,
+    moveA,
+    moveB,
+    cardA: cA,
+    cardB: cB,
+    atkA,
+    defB,
+    atkB,
+    defA,
+    resAtoB,
+    resBtoA,
+    dmgAppliedToA,
+    dmgAppliedToB,
+  };
+  state.history.push(record);
+  return record;
+}
+
+// ============================================================================
+// SCREEN 1 -> SCREEN 2: DRAFT & LEADER SELECTION
+// ============================================================================
+function startDraft() {
+  if (!db.length) return;
+  const presetKey = $("presetSelect").value;
+  const mode = $("metaSelect").value;
+
+  if (isOnline()) {
+    if (!roomClient.roomCode) {
+      $("loadError").classList.remove("hidden");
+      $("loadError").textContent = "Please Create or Join a Room Code first before drafting teams.";
+      return;
+    }
+    if (roomClient.role === "GUEST") {
+      $("loadError").classList.remove("hidden");
+      $("loadError").textContent = "Waiting for the Host to click Draft Teams & Assign Leaders.";
+      return;
+    }
+    $("loadError").classList.add("hidden");
+    updateRoomHeaderBadge();
+  } else {
+    $("loadError").classList.add("hidden");
+  }
+
+  const { cardsA, cardsB, audit } = generateTeamsForMatch(presetKey, mode);
+  draftedTeams = {
+    presetKey,
+    mode,
+    nameA: $("playerAName").value.trim() || "Player 1",
+    nameB: isComputer() ? "Computer" : $("playerBName").value.trim() || "Player 2",
+    cardsA,
+    cardsB,
+    audit,
+  };
+
+  tempCapA = null;
+  tempVcA = null;
+  tempCapB = null;
+  tempVcB = null;
+
+  if (isOnline() && roomClient.role === "HOST") {
+    roomClient.send({
+      type: "TEAM_DRAFT_SYNC",
+      presetKey,
+      mode,
+      nameA: draftedTeams.nameA,
+      nameB: draftedTeams.nameB,
+      cardsA: draftedTeams.cardsA,
+      cardsB: draftedTeams.cardsB,
+      audit,
+    });
+    $("curtainLeaderTitle").textContent = `${draftedTeams.nameA} — Pick Your Leaders`;
+    $("curtainLeaderSub").textContent = "Select your Captain (1.8×) and Vice-Captain (1.4×) privately on your device.";
+    $("btnRevealLeaders").classList.remove("hidden");
+    showScreen("screenLeaders");
+    $("leaderCurtain").classList.remove("hidden");
+    $("leaderPickerContent").classList.add("hidden");
+    return;
+  }
+
+  if (isComputer()) {
+    const r = shuffle(cardsB);
+    tempCapB = r[0].id;
+    tempVcB = r[1].id;
+  }
+
+  openLeaderCurtain("A");
+  showScreen("screenLeaders");
+}
+
+function openLeaderCurtain(side) {
+  leaderDraftStep = side;
+  const pName = side === "A" ? draftedTeams.nameA : draftedTeams.nameB;
+  $("curtainLeaderTitle").textContent = `Pass Device to ${pName}`;
+  $("curtainLeaderSub").textContent =
+    "Keep the screen hidden from your opponent while choosing your Captain (1.8×) and Vice-Captain (1.4×).";
+  $("btnRevealLeaders").classList.remove("hidden");
+  $("leaderCurtain").classList.remove("hidden");
+  $("leaderPickerContent").classList.add("hidden");
+}
+
+function renderLeaderPicker() {
+  const side = isOnline() ? (roomClient.role === "GUEST" ? "B" : "A") : leaderDraftStep;
+  const pName = side === "A" ? draftedTeams.nameA : draftedTeams.nameB;
+  const cards = side === "A" ? draftedTeams.cardsA : draftedTeams.cardsB;
+  const capId = side === "A" ? tempCapA : tempCapB;
+  const vcId = side === "A" ? tempVcA : tempVcB;
+
+  $("leaderHeader").textContent = `${pName} — Select Captain & Vice-Captain`;
+  $("leaderCountBadge").textContent = `${cards.length} Cards`;
+
+  const capCard = cards.find((c) => c.id === capId);
+  const vcCard = cards.find((c) => c.id === vcId);
+  $("chosenCapLabel").textContent = capCard ? `${capCard.name} (${capCard.id})` : "None";
+  $("chosenVcLabel").textContent = vcCard ? `${vcCard.name} (${vcCard.id})` : "None";
+
+  if (isOnline()) {
+    $("btnConfirmLeaders").textContent =
+      roomClient.role === "HOST"
+        ? "Lock My Leaders & Wait for Player 2"
+        : "Lock My Leaders & Enter Arena";
+  } else if (isComputer()) {
+    $("btnConfirmLeaders").textContent = "Confirm Leaders & Start Battle!";
+  } else {
+    $("btnConfirmLeaders").textContent =
+      side === "A" ? `Confirm & Pass to ${draftedTeams.nameB}` : "Confirm & Start Battle at Level 1!";
+  }
+  $("btnConfirmLeaders").disabled = !(capId && vcId && capId !== vcId);
+
+  $("leaderRosterGrid").innerHTML = cards
+    .map((c) => {
+      const isCap = c.id === capId;
+      const isVc = c.id === vcId;
+      const badge = isCap
+        ? '<span class="badge badge-cap">CAP 1.8×</span>'
+        : isVc
+        ? '<span class="badge badge-vc">VC 1.4×</span>'
+        : "";
+      const extraClass = isCap ? "cap-card selected" : isVc ? "vc-card selected" : "";
+      const footer = `
+        <div class="role-actions">
+          <button type="button" data-role="cap" data-cid="${c.id}">${isCap ? "✓ Captain" : "Set Captain"}</button>
+          <button type="button" data-role="vc" data-cid="${c.id}">${isVc ? "✓ Vice-Cap" : "Set Vice-Cap"}</button>
+        </div>
+      `;
+      return renderCardMarkup(c, { badgeHtml: badge, extraClass, footerHtml: footer, selectedRibbon: isCap || isVc });
+    })
+    .join("");
+
+  $("leaderRosterGrid").querySelectorAll("button[data-role]").forEach((btn) => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const cid = btn.dataset.cid;
+      const role = btn.dataset.role;
+      if (side === "A") {
+        if (role === "cap") {
+          tempCapA = cid;
+          if (tempVcA === cid) tempVcA = null;
+        } else {
+          tempVcA = cid;
+          if (tempCapA === cid) tempCapA = null;
+        }
+      } else {
+        if (role === "cap") {
+          tempCapB = cid;
+          if (tempVcB === cid) tempVcB = null;
+        } else {
+          tempVcB = cid;
+          if (tempCapB === cid) tempCapB = null;
+        }
+      }
+      renderLeaderPicker();
+    };
+  });
+}
+
+function startOnlineMatchAsHost() {
+  const teamADef = {
+    name: draftedTeams.nameA,
+    cards: draftedTeams.cardsA,
+    captainId: tempCapA,
+    viceCaptainId: tempVcA,
+  };
+  const teamBDef = {
+    name: draftedTeams.nameB,
+    cards: draftedTeams.cardsB,
+    captainId: tempCapB,
+    viceCaptainId: tempVcB,
+  };
+
+  matchState = createNewMatchState({
+    presetKey: draftedTeams.presetKey,
+    teamA: teamADef,
+    teamB: teamBDef,
+  });
+
+  roomClient.send({
+    type: "START_ONLINE_MATCH",
+    presetKey: draftedTeams.presetKey,
+    teamA: teamADef,
+    teamB: teamBDef,
+  });
+  persistOnlineState();
+
+  myMoveLockedOnline = false;
+  remoteMoveBuffer = null;
+  lastAppliedOnlineRound = 0;
+  selectedCardId = null;
+
+  showScreen("screenArena");
+  updateHud();
+  prepareOnlineTurnUi();
+}
+
+function confirmLeaders() {
+  if (isOnline()) {
+    if (roomClient.role === "GUEST") {
+      roomClient.send({
+        type: "GUEST_LEADERS_LOCKED",
+        captainId: tempCapB,
+        viceCaptainId: tempVcB,
+      });
+      $("leaderPickerContent").classList.add("hidden");
+      $("leaderCurtain").classList.remove("hidden");
+      $("curtainLeaderTitle").textContent = "Leaders Locked!";
+      $("curtainLeaderSub").textContent = "Waiting for Host to start the match...";
+      $("btnRevealLeaders").classList.add("hidden");
+    } else {
+      if (tempCapB && tempVcB) {
+        startOnlineMatchAsHost();
+      } else {
+        $("leaderPickerContent").classList.add("hidden");
+        $("leaderCurtain").classList.remove("hidden");
+        $("curtainLeaderTitle").textContent = "Leaders Locked!";
+        $("curtainLeaderSub").textContent = "Waiting for Player 2 to confirm their Captain & Vice-Captain...";
+        $("btnRevealLeaders").classList.add("hidden");
+      }
+    }
+    return;
+  }
+
+  if (leaderDraftStep === "A" && !isComputer()) {
+    openLeaderCurtain("B");
+    return;
+  }
+
+  matchState = createNewMatchState({
+    presetKey: draftedTeams.presetKey,
+    teamA: {
+      name: draftedTeams.nameA,
+      cards: draftedTeams.cardsA,
+      captainId: tempCapA,
+      viceCaptainId: tempVcA,
+    },
+    teamB: {
+      name: draftedTeams.nameB,
+      cards: draftedTeams.cardsB,
+      captainId: tempCapB,
+      viceCaptainId: tempVcB,
+    },
+  });
+
+  pickStep = "P1_PICK";
+  lockedMoveA = null;
+  selectedCardId = null;
+
+  showScreen("screenArena");
+  updateHud();
+  prepareTurnCurtain();
+}
+
+// ============================================================================
+// SCREEN 3: LIVE BATTLE ARENA & HUD
+// ============================================================================
+function renderTierStepper() {
+  const activeLvl = matchState.status === "FINISHED" ? 7 : matchState.level;
+  $("tierStepper").innerHTML = LEVELS.map((l) => {
+    const cls = l < activeLvl ? "done" : l === activeLvl ? "active" : "";
+    const pA = matchState.players.A;
+    const totalInTier = pA.roster.filter((c) => Number(c.level) === l).length;
+    const usedInTier = pA.roster.filter((c) => Number(c.level) === l && pA.usedCardIds.includes(c.id)).length;
+    return `<div class="tier-step ${cls}">${levelName(l)}<br>${usedInTier}/${totalInTier}</div>`;
+  }).join("");
+
+  if (matchState.status === "IN_PROGRESS") {
+    const pA = matchState.players.A;
+    const rem = pA.roster.filter((c) => Number(c.level) === matchState.level && !pA.usedCardIds.includes(c.id)).length;
+    $("tierRemainingText").textContent = `Current Stage: ${levelName(matchState.level)} (${rem} clash${rem > 1 ? "es" : ""} left)`;
+  } else {
+    $("tierRemainingText").textContent = "Match Complete";
+  }
+}
+
+function updateHud() {
+  renderTierStepper();
+  ["A", "B"].forEach((side) => {
+    const p = matchState.players[side];
+    $(`hudName${side}`).textContent = p.name;
+
+    const statusEl = $(`hudStatus${side}`);
+    if (isOnline()) {
+      const isMe = (roomClient.role === "HOST" && side === "A") || (roomClient.role === "GUEST" && side === "B");
+      if (pickStep === "CLASH_REVEAL") {
+        statusEl.textContent = "RESOLVED";
+        statusEl.className = "role-pill";
+      } else if (isMe) {
+        statusEl.textContent = myMoveLockedOnline ? "MOVE LOCKED" : "YOUR TURN";
+        statusEl.className = `role-pill ${myMoveLockedOnline ? "locked" : "active"}`;
+      } else {
+        statusEl.textContent = "OPPONENT";
+        statusEl.className = "role-pill";
+      }
+    } else if (pickStep === "P1_PICK") {
+      statusEl.textContent = side === "A" ? "PICKING NOW" : "WAITING";
+      statusEl.className = `role-pill ${side === "A" ? "active" : ""}`;
+    } else if (pickStep === "P2_PICK") {
+      statusEl.textContent = side === "A" ? "MOVE LOCKED" : "PICKING NOW";
+      statusEl.className = `role-pill ${side === "B" ? "locked" : "active"}`;
+    } else {
+      statusEl.textContent = "RESOLVED";
+      statusEl.className = "role-pill";
+    }
+
+    $(`hudHpText${side}`).textContent = `${fmt(p.hp)} / ${fmt(p.maxHp)} HP`;
+    const armorEl = $(`hudArmorText${side}`);
+    if (p.extraArmorHp > 0.0001) {
+      armorEl.textContent = `+${fmt(p.extraArmorHp)} Temp HP`;
+      armorEl.classList.remove("hidden");
+    } else {
+      armorEl.classList.add("hidden");
+    }
+
+    const hpPct = Math.max(0, Math.min(100, (p.hp / p.maxHp) * 100));
+    $(`hudHpBar${side}`).style.width = `${hpPct}%`;
+
+    $(`hudShieldText${side}`).textContent = `${fmt(p.shields)} / 2.00+`;
+    const shPct = Math.max(0, Math.min(100, (p.shields / 2.0) * 100));
+    $(`hudShieldBar${side}`).style.width = `${shPct}%`;
+
+    const isAllowedShield =
+      !isOnline() ||
+      (roomClient.role === "HOST" && side === "A") ||
+      (roomClient.role === "GUEST" && side === "B");
+    const canUseShield = isAllowedShield && matchState.status === "IN_PROGRESS" && p.shields + 0.000001 >= 2.0 && pickStep !== "CLASH_REVEAL";
+    $(`btnShield${side}`).disabled = !canUseShield;
+
+    const remaining = p.roster.length - p.usedCardIds.length;
+    $(`hudCardsLeft${side}`).textContent = `Cards Left: ${remaining} / ${p.roster.length}`;
+  });
+}
+
+function handleActivateShield(side) {
+  if (!matchState || matchState.status !== "IN_PROGRESS") return;
+  const p = matchState.players[side];
+  if (p.shields + 0.000001 < 2.0) return;
+
+  p.shields = +(p.shields - 2.0).toFixed(6);
+  const restored = Math.max(0, Math.min(1.125, p.maxHp - p.hp));
+  p.hp = +(p.hp + restored).toFixed(6);
+  const potential = (1.125 - restored) * (0.5 / 1.125);
+  const gained = Math.min(potential, 0.5 - p.extraArmorHp);
+  p.extraArmorHp = +(p.extraArmorHp + gained).toFixed(6);
+
+  const ev = {
+    type: "SHIELD_ACTIVATED",
+    round: matchState.round + 1,
+    playerSide: side,
+    remainingShields: p.shields,
+    hp: p.hp,
+    extraArmorHp: p.extraArmorHp,
+    restored,
+    gained,
+  };
+  matchState.history.push(ev);
+
+  if (isOnline()) {
+    roomClient.send({ type: "SHIELD_SYNC", event: ev });
+    persistOnlineState();
+  }
+  updateHud();
+  renderHistoryLog();
+  alert(`${p.name} spent 2.00 Shield: +${fmt(restored)} HP, +${fmt(gained)} Temp HP!`);
+}
+
+function prepareOnlineTurnUi() {
+  const lvl = matchState.level;
+  pickStep = "P1_PICK";
+  myMoveLockedOnline = false;
+  selectedCardId = null;
+
+  $("turnBanner").textContent = `Round ${matchState.round + 1} — ${levelName(lvl)} Online Clash`;
+  $("tierLockBadge").textContent = `Active Tier: ${levelName(lvl)}`;
+
+  $("turnCurtainTitle").textContent = `Room ${roomClient.roomCode} — ${levelName(lvl)}`;
+  $("turnCurtainSub").textContent = "Reveal your private hand to choose your fighter and Attack Style.";
+  $("btnRevealTurn").classList.remove("hidden");
+
+  $("turnCurtain").classList.remove("hidden");
+  $("turnControls").classList.add("hidden");
+  $("clashRevealPanel").classList.add("hidden");
+  $("matchOverPanel").classList.add("hidden");
+  updateHud();
+}
+
+function prepareTurnCurtain() {
+  if (isOnline()) {
+    prepareOnlineTurnUi();
+    return;
+  }
+  const lvl = matchState.level;
+  const activeSide = pickStep === "P1_PICK" ? "A" : "B";
+  const activePlayer = matchState.players[activeSide];
+
+  $("turnBanner").textContent = `Round ${matchState.round + 1} — ${levelName(lvl)} Clash`;
+  $("tierLockBadge").textContent = `Active Tier: ${levelName(lvl)}`;
+
+  $("turnCurtainTitle").textContent = `Pass Device to ${activePlayer.name}`;
+  $("turnCurtainSub").textContent =
+    pickStep === "P1_PICK"
+      ? `Choose your ${levelName(lvl)} fighter and Attack Style.`
+      : `${matchState.players.A.name} locked a move! Now choose your ${levelName(lvl)} fighter and Attack Style.`;
+  $("btnRevealTurn").classList.remove("hidden");
+
+  $("turnCurtain").classList.remove("hidden");
+  $("turnControls").classList.add("hidden");
+  $("clashRevealPanel").classList.add("hidden");
+  $("matchOverPanel").classList.add("hidden");
+  updateHud();
+}
+
+function refreshMoveSelectorLabels(card) {
+  const lvl = card ? Number(card.level) : null;
+  $("styleBtnGroup").querySelectorAll("button").forEach((btn) => {
+    const st = btn.dataset.style;
+    const meta = STYLES[st];
+    if (!card) {
+      btn.innerHTML = `<span>${st} (${meta.short})</span>`;
+      return;
+    }
+    const atkHtml = formatStatSignal(card[meta.atk], lvl, meta.atk);
+    const defHtml = formatStatSignal(card[meta.def], lvl, meta.def);
+    btn.innerHTML = `<span>${st} (${meta.short})</span><span class="btn-stat-sub">ATK ${atkHtml} · DEF ${defHtml}</span>`;
+  });
+}
+
+function updateSelectedPreviewBar(player) {
+  const previewEl = $("selectedPreviewBar");
+  if (!selectedCardId) {
+    previewEl.classList.add("hidden");
+    refreshMoveSelectorLabels(null);
+    return;
+  }
+  const card = player.roster.find((c) => c.id === selectedCardId);
+  if (!card) return;
+  const lvl = Number(card.level);
+  const meta = STYLES[selectedStyle];
+  const atkHtml = formatStatSignal(card[meta.atk], lvl, meta.atk);
+  const defHtml = formatStatSignal(card[meta.def], lvl, meta.def);
+
+  refreshMoveSelectorLabels(card);
+
+  previewEl.classList.remove("hidden");
+  previewEl.innerHTML = `
+    <img src="${portraitSrc(card)}" alt="${card.name}" />
+    <div>
+      <div><strong class="gold-text">Marked Fighter:</strong> ${card.name} (${card.id})</div>
+      <div class="muted">Active Pick: <b>${selectedStyle}</b> (ATK ${atkHtml} / DEF ${defHtml})</div>
+    </div>
+  `;
+}
+
+function revealActiveHand() {
+  const lvl = matchState.level;
+  const side = mySide();
+  const player = matchState.players[side];
+
+  $("turnCurtain").classList.add("hidden");
+  $("turnControls").classList.remove("hidden");
+
+  selectedCardId = null;
+  $("selectedPreviewBar").classList.add("hidden");
+  refreshMoveSelectorLabels(null);
+  $("btnLockMove").disabled = true;
+  $("btnLockMove").textContent = "Select a Card Above to Lock Move";
+
+  $("activeTierPrompt").textContent = `${player.name} — Tap 1 available ${levelName(lvl)} fighter:`;
+
+  const tierCards = player.roster.filter((c) => Number(c.level) === lvl);
+  $("handGrid").innerHTML = tierCards
+    .map((c) => {
+      const isUsed = player.usedCardIds.includes(c.id);
+      const isCap = c.id === player.captainId;
+      const isVc = c.id === player.viceCaptainId;
+
+      let badges = "";
+      if (isCap) badges += '<span class="badge badge-cap">CAP 1.8×</span>';
+      if (isVc) badges += '<span class="badge badge-vc">VC 1.4×</span>';
+      if (isUsed) badges += '<span class="badge badge-used">USED</span>';
+
+      const classes = [isCap ? "cap-card" : isVc ? "vc-card" : "", isUsed ? "used" : ""].filter(Boolean).join(" ");
+      return renderCardMarkup(c, { badgeHtml: badges, extraClass: classes, selectedRibbon: false });
+    })
+    .join("");
+
+  $("handGrid").querySelectorAll(".game-card").forEach((el) => {
+    el.onclick = () => {
+      const cid = el.dataset.id;
+      if (player.usedCardIds.includes(cid)) return;
+      selectedCardId = cid;
+
+      $("btnLockMove").disabled = false;
+      if (isOnline()) {
+        $("btnLockMove").textContent = "Lock My Move Privately & Wait for Opponent";
+      } else if (isComputer()) {
+        $("btnLockMove").textContent = "Lock Move & Battle Computer!";
+      } else {
+        $("btnLockMove").textContent =
+          pickStep === "P1_PICK"
+            ? `Lock ${player.name}'s Move & Pass to ${matchState.players.B.name}`
+            : `Lock ${player.name}'s Move & Simulate Clash!`;
+      }
+
+      $("handGrid").querySelectorAll(".game-card").forEach((cardEl) => {
+        const isThis = cardEl.dataset.id === selectedCardId;
+        cardEl.classList.toggle("selected", isThis);
+        const existingRibbon = cardEl.querySelector(".selected-ribbon");
+        if (isThis && !existingRibbon) {
+          cardEl.insertAdjacentHTML("afterbegin", '<div class="selected-ribbon">✓ SELECTED</div>');
+        } else if (!isThis && existingRibbon) {
+          existingRibbon.remove();
+        }
+      });
+
+      updateSelectedPreviewBar(player);
+    };
+  });
+}
+
+function resolveOnlineTurnOnHost() {
+  if (!lockedMoveA || !remoteMoveBuffer) return;
+  const record = executeTurnClash(matchState, {
+    moveA: lockedMoveA,
+    moveB: remoteMoveBuffer,
+  });
+
+  const stateSnapshot = snapshotMatchState();
+  roomClient.send({
+    type: "HOST_ROUND_RESOLVED",
+    record,
+    stateAfter: stateSnapshot,
+  });
+  persistOnlineState();
+
+  lockedMoveA = null;
+  remoteMoveBuffer = null;
+  myMoveLockedOnline = false;
+  pickStep = "CLASH_REVEAL";
+  runAnimatedBattleSimulation(record);
+}
+
+// ============================================================================
+// VISUAL CALCULATION CARDS & 60FPS ANIME VFX SIMULATION (N13_firebase style)
+// ============================================================================
+function buildCalcCardHtml({ attackerName, defenderName, style, atkVal, defVal, resObj }) {
+  const isHit = resObj.damage > 0;
+  const branchClass = isHit ? "branch-hit" : "branch-block";
+  const branchText = isHit ? "HIT · ATK > DEF" : "BLOCKED · SHIELD GAINED";
+
+  const chips = [`<span class="calc-chip">Style: ${style}</span>`];
+  if (resObj.roleBonus !== "NONE") {
+    chips.push(`<span class="calc-chip mod-leader">${resObj.roleBonus}</span>`);
+  }
+
+  return `
+    <div class="calc-card">
+      <div class="calc-card-header">
+        <strong>${attackerName} → ${defenderName}</strong>
+        <span class="branch-tag ${branchClass}">${branchText}</span>
+      </div>
+      <div class="calc-vs-row">
+        <span>ATK (${STYLES[style].short}): <strong class="gold-text">${fmt(atkVal)}</strong></span>
+        <span class="muted">vs</span>
+        <span>DEF (${STYLES[style].short}): <strong class="blue-text">${fmt(defVal)}</strong></span>
+      </div>
+      <div class="calc-chips">${chips.join("")}</div>
+      <div class="calc-outcome">
+        <span>Damage: <span class="${isHit ? "red-text" : "ok"}">${fmt(resObj.damage)} HP</span></span>
+        <span>${defenderName} Shield: <span class="blue-text">+${fmt(resObj.shield_gain)}</span></span>
+      </div>
+    </div>
+  `;
+}
+
+function runAnimatedBattleSimulation(record) {
+  clearAnimTimers();
+  lastClashRecord = record;
+
+  const pA = matchState.players.A;
+  const pB = matchState.players.B;
+  const cardA = record.cardA;
+  const cardB = record.cardB;
+  const fxA = STYLES[record.moveA.style].fx;
+  const fxB = STYLES[record.moveB.style].fx;
+
+  const badgeA = `<span class="badge badge-cap">${pA.name}: ${STYLES[record.moveA.style].short}</span>`;
+  const badgeB = `<span class="badge badge-vc">${pB.name}: ${STYLES[record.moveB.style].short}</span>`;
+
+  $("turnControls").classList.add("hidden");
+  $("turnCurtain").classList.add("hidden");
+  $("clashRevealPanel").classList.remove("hidden");
+  $("revealDetailsWrapper").classList.add("hidden");
+  $("btnReplayAnim").classList.add("hidden");
+  $("revealHeadline").textContent = `Round ${record.round} (${levelName(record.level)}) — Live Anime Battle Sequence`;
+
+  const vfxBadge = $("stageVfxBadge");
+  const arrowEl = $("stageArrow");
+  const statusEl = $("stageStatusBanner");
+
+  $("stageFighterA").innerHTML = renderCardMarkup(cardA, { badgeHtml: badgeA, extraClass: "anim-enter-left" });
+  $("stageFighterB").innerHTML = renderCardMarkup(cardB, { badgeHtml: badgeB, extraClass: "anim-enter-right" });
+  vfxBadge.className = "vfx-badge";
+  vfxBadge.textContent = "FACE OFF!";
+  arrowEl.textContent = "⚔️";
+  statusEl.textContent = `${pA.name} vs ${pB.name}`;
+  fxEngine.playClashIntro();
+
+  animTimers.push(
+    setTimeout(() => {
+      $("stageFighterA").innerHTML = renderCardMarkup(cardA, { badgeHtml: badgeA, extraClass: "anim-lunge-right" });
+      $("stageFighterB").innerHTML = renderCardMarkup(cardB, { badgeHtml: badgeB });
+      vfxBadge.className = `vfx-badge vfx-${fxA}`;
+      vfxBadge.textContent = `${pA.name} ${STYLES[record.moveA.style].short}!`;
+      arrowEl.textContent = "➔";
+      statusEl.textContent = `${pA.name} unleashes ${record.moveA.style}!`;
+      fxEngine.playStyleAttack("A", fxA);
+    }, 680)
+  );
+
+  animTimers.push(
+    setTimeout(() => {
+      const p1Hit = record.resAtoB.damage > 0;
+      const p1Heavy = record.resAtoB.damage >= 1.5 || record.resAtoB.roleBonus !== "NONE";
+      const popupB = p1Hit
+        ? `<div class="floating-popup popup-dmg">HIT! -${fmt(record.resAtoB.damage)} HP</div>`
+        : `<div class="floating-popup popup-block">BLOCKED! +${fmt(record.resAtoB.shield_gain)} SH</div>`;
+
+      $("stageFighterA").innerHTML = renderCardMarkup(cardA, { badgeHtml: badgeA });
+      $("stageFighterB").innerHTML = renderCardMarkup(cardB, {
+        badgeHtml: badgeB,
+        extraClass: p1Hit ? "anim-hit" : "anim-block",
+        popupHtml: popupB,
+      });
+      statusEl.textContent = p1Hit
+        ? `${pA.name} LANDS ${fmt(record.resAtoB.damage)} DMG!`
+        : `${pB.name} BLOCKED! (+${fmt(record.resAtoB.shield_gain)} Shield)`;
+
+      fxEngine.playImpact("B", { isHit: p1Hit, heavy: p1Heavy, style: fxA, isCounter: false });
+    }, 1140)
+  );
+
+  animTimers.push(
+    setTimeout(() => {
+      $("stageFighterA").innerHTML = renderCardMarkup(cardA, { badgeHtml: badgeA });
+      $("stageFighterB").innerHTML = renderCardMarkup(cardB, { badgeHtml: badgeB, extraClass: "anim-lunge-left" });
+      vfxBadge.className = `vfx-badge vfx-${fxB}`;
+      vfxBadge.textContent = `${pB.name} ${STYLES[record.moveB.style].short}!`;
+      arrowEl.textContent = "⬅";
+      statusEl.textContent = `${pB.name} counters with ${record.moveB.style}!`;
+      fxEngine.playStyleAttack("B", fxB);
+    }, 2050)
+  );
+
+  animTimers.push(
+    setTimeout(() => {
+      const p2Hit = record.resBtoA.damage > 0;
+      const p2Heavy = record.resBtoA.damage >= 1.5 || record.resBtoA.roleBonus !== "NONE";
+      const popupA = p2Hit
+        ? `<div class="floating-popup popup-dmg">HIT! -${fmt(record.resBtoA.damage)} HP</div>`
+        : `<div class="floating-popup popup-block">BLOCKED! +${fmt(record.resBtoA.shield_gain)} SH</div>`;
+
+      $("stageFighterA").innerHTML = renderCardMarkup(cardA, {
+        badgeHtml: badgeA,
+        extraClass: p2Hit ? "anim-hit" : "anim-block",
+        popupHtml: popupA,
+      });
+      $("stageFighterB").innerHTML = renderCardMarkup(cardB, { badgeHtml: badgeB });
+      statusEl.textContent = p2Hit
+        ? `${pB.name} LANDS ${fmt(record.resBtoA.damage)} DMG!`
+        : `${pA.name} BLOCKED! (+${fmt(record.resBtoA.shield_gain)} Shield)`;
+
+      fxEngine.playImpact("A", { isHit: p2Hit, heavy: p2Heavy, style: fxB, isCounter: false });
+
+      updateHud();
+      renderHistoryLog();
+    }, 2510)
+  );
+
+  animTimers.push(
+    setTimeout(() => {
+      vfxBadge.className = "vfx-badge";
+      vfxBadge.textContent = "CLASH RESOLVED";
+      arrowEl.textContent = "✓";
+      $("btnReplayAnim").classList.remove("hidden");
+      $("revealDetailsWrapper").classList.remove("hidden");
+
+      $("calcCardsGrid").innerHTML =
+        buildCalcCardHtml({
+          attackerName: pA.name,
+          defenderName: pB.name,
+          style: record.moveA.style,
+          atkVal: record.atkA,
+          defVal: record.defB,
+          resObj: record.resAtoB,
+        }) +
+        buildCalcCardHtml({
+          attackerName: pB.name,
+          defenderName: pA.name,
+          style: record.moveB.style,
+          atkVal: record.atkB,
+          defVal: record.defA,
+          resObj: record.resBtoA,
+        });
+
+      $("revealNetSummary").innerHTML = `
+        <div>${pA.name} HP Lost: <span class="red-text">-${fmt(record.dmgAppliedToA.hpLost)} HP</span> | Shield: <span class="ok">+${fmt(record.resBtoA.shield_gain)}</span></div>
+        <div>${pB.name} HP Lost: <span class="red-text">-${fmt(record.dmgAppliedToB.hpLost)} HP</span> | Shield: <span class="ok">+${fmt(record.resAtoB.shield_gain)}</span></div>
+      `;
+
+      $("btnNextTurn").textContent =
+        matchState.status === "FINISHED"
+          ? "View Final Match Result"
+          : `Continue to Round ${matchState.round + 1} (${levelName(matchState.level)})`;
+    }, 3200)
+  );
+}
+
+function handleLockMove() {
+  if (!selectedCardId) return;
+
+  const chosenMove = {
+    cardId: selectedCardId,
+    style: selectedStyle,
+  };
+
+  if (isOnline()) {
+    myMoveLockedOnline = true;
+    $("turnControls").classList.add("hidden");
+    $("turnCurtain").classList.remove("hidden");
+    $("btnRevealTurn").classList.add("hidden");
+    $("turnCurtainTitle").textContent = "Move Locked Privately!";
+    updateHud();
+
+    if (roomClient.role === "HOST") {
+      lockedMoveA = chosenMove;
+      if (remoteMoveBuffer) {
+        resolveOnlineTurnOnHost();
+      } else {
+        $("turnCurtainSub").textContent = "Waiting for Player 2 to lock their move in the room...";
+      }
+    } else {
+      roomClient.send({ type: "GUEST_MOVE_LOCKED", move: chosenMove, round: matchState.round });
+      $("turnCurtainSub").textContent = "Sent to Host! Waiting for simultaneous clash resolution...";
+    }
+    return;
+  }
+
+  if (isComputer()) {
+    const pB = matchState.players.B;
+    const availB = pB.roster.filter((c) => Number(c.level) === matchState.level && !pB.usedCardIds.includes(c.id));
+    const aiCard = shuffle(availB)[0];
+    const aiStyle = shuffle(Object.keys(STYLES))[0];
+    const record = executeTurnClash(matchState, {
+      moveA: chosenMove,
+      moveB: { cardId: aiCard.id, style: aiStyle },
+    });
+    pickStep = "CLASH_REVEAL";
+    runAnimatedBattleSimulation(record);
+    return;
+  }
+
+  if (pickStep === "P1_PICK") {
+    lockedMoveA = chosenMove;
+    pickStep = "P2_PICK";
+    prepareTurnCurtain();
+    return;
+  }
+
+  const record = executeTurnClash(matchState, {
+    moveA: lockedMoveA,
+    moveB: chosenMove,
+  });
+
+  pickStep = "CLASH_REVEAL";
+  runAnimatedBattleSimulation(record);
+}
+
+function advanceTurn() {
+  clearAnimTimers();
+  if (matchState.status === "FINISHED") {
+    $("clashRevealPanel").classList.add("hidden");
+    $("matchOverPanel").classList.remove("hidden");
+    const w = matchState.winner;
+    $("winnerTitle").textContent =
+      w === "DRAW" ? "Match Ended in a Draw!" : `${matchState.players[w].name} Wins the Match!`;
+    const pA = matchState.players.A;
+    const pB = matchState.players.B;
+    $("winnerSummary").textContent =
+      `${pA.name}: ${fmt(pA.hp)} HP (+${fmt(pA.extraArmorHp)} Temp HP) | ${pB.name}: ${fmt(pB.hp)} HP (+${fmt(pB.extraArmorHp)} Temp HP)`;
+    return;
+  }
+
+  pickStep = "P1_PICK";
+  lockedMoveA = null;
+  if (!isOnline()) remoteMoveBuffer = null;
+  myMoveLockedOnline = false;
+  selectedCardId = null;
+  prepareTurnCurtain();
+}
+
+function renderHistoryLog() {
+  if (!matchState) return;
+  $("historyLog").innerHTML = matchState.history
+    .slice()
+    .reverse()
+    .map((item) => {
+      if (item.type === "SHIELD_ACTIVATED") {
+        const p = matchState.players[item.playerSide];
+        return `<div class="history-item"><b>[Round ${item.round}]</b> ${p.name} used 2.00 Shield (+${fmt(item.restored)} HP, +${fmt(item.gained)} Temp HP)</div>`;
+      }
+      const pA = matchState.players.A;
+      const pB = matchState.players.B;
+      return `<div class="history-item"><b>[Round ${item.round} · ${levelName(item.level)}]</b> ${pA.name} (${item.cardA.name} · ${item.moveA.style}) vs ${pB.name} (${item.cardB.name} · ${item.moveB.style}) → ${pA.name} -${fmt(item.dmgAppliedToA.hpLost)} HP (+${fmt(item.resBtoA.shield_gain)} SH), ${pB.name} -${fmt(item.dmgAppliedToB.hpLost)} HP (+${fmt(item.resAtoB.shield_gain)} SH)</div>`;
+    })
+    .join("");
+}
+
+function renderRulesAndAuditModal() {
+  const auditHtml = draftedTeams?.audit?.length
+    ? draftedTeams.audit
+        .map(
+          (r) => `
+          <div class="rule-box">
+            <h4>${levelName(r.level)} Candidate Pool <span class="rule-badge-branch">${r.pool} Cards</span></h4>
+            <div class="rule-line"><b>Styles:</b> ${r.styles.length ? r.styles.join(" · ") : "Random"}</div>
+            <div class="rule-line"><b>Density:</b> High ${r.density.high} · Med ${r.density.medium} · Low ${r.density.low}</div>
+            <div class="rule-line"><b>Pool Cards:</b> ${r.poolCards.map((c) => `${c.id} ${c.name}`).join(", ")}</div>
+          </div>`
+        )
+        .join("")
+    : "";
+
+  $("rulesModalBody").innerHTML = `
+    <div class="rule-box">
+      <h4>⚔️ Attack &amp; Block Resolution <span class="rule-badge-branch">5 Styles</span></h4>
+      <div class="rule-line"><b>Hit:</b> When <code>ATK &gt; DEF</code> (by &gt; 0.0001), attacker deals <code>ATK - DEF</code> damage.</div>
+      <div class="rule-line"><b>Block / Tie:</b> When <code>DEF ≥ ATK</code>, defender takes 0 damage and gains <code>max(DEF - ATK, 0)</code> shield (or <code>1.00</code> base shield for Captain/Vice on an exact tie).</div>
+    </div>
+    <div class="rule-box">
+      <h4>★ Captain &amp; Vice-Captain <span class="rule-badge-branch">1.8× / 1.4×</span></h4>
+      <div class="rule-line"><b>Captain (1.8×):</b> Multiplies successful attack damage by <b>1.8×</b> and successful block shield gain by <b>1.8×</b>.</div>
+      <div class="rule-line"><b>Vice-Captain (1.4×):</b> Multiplies successful attack damage by <b>1.4×</b> and successful block shield gain by <b>1.4×</b>.</div>
+    </div>
+    <div class="rule-box">
+      <h4>🛡️ Manual Shield &amp; HP <span class="rule-badge-branch">10.00 HP</span></h4>
+      <div class="rule-line"><b>Starting HP:</b> 10.00 HP per team. Spend <b>2.00 Shield</b> on your turn to restore up to <b>+1.125 HP</b> and up to <b>+0.50 Temp HP</b>.</div>
+      <div class="rule-line"><b>Tier Progression:</b> Clear all fighters in Level 1 → Level 2 → Level 3 → Level 4 → Level 5 → Special.</div>
+    </div>
+    ${auditHtml}
+  `;
+}
+
+// ============================================================================
+// WIRE BUTTONS & CHOICE GROUPS (N13_firebase UI bindings)
+// ============================================================================
+$("modeBtnGroup").querySelectorAll("button").forEach((btn) => {
+  btn.onclick = () => {
+    $("modeBtnGroup").querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    playMode = btn.dataset.mode;
+    $("onlineRoomPanel").classList.toggle("hidden", !isOnline());
+    updateRoomHeaderBadge();
+  };
+});
+
+$("btnCreateRoom").onclick = handleCreateRoom;
+$("btnJoinRoom").onclick = handleJoinRoom;
+
+$("presetSelect").onchange = renderPresetSummary;
+$("btnDraftTeams").onclick = startDraft;
+$("btnRevealLeaders").onclick = () => {
+  $("btnRevealLeaders").classList.remove("hidden");
+  $("leaderCurtain").classList.add("hidden");
+  $("leaderPickerContent").classList.remove("hidden");
+  renderLeaderPicker();
+};
+$("btnConfirmLeaders").onclick = confirmLeaders;
+$("btnRevealTurn").onclick = revealActiveHand;
+$("btnLockMove").onclick = handleLockMove;
+$("btnNextTurn").onclick = advanceTurn;
+$("btnReplayAnim").onclick = () => lastClashRecord && runAnimatedBattleSimulation(lastClashRecord);
+$("btnShieldA").onclick = () => handleActivateShield("A");
+$("btnShieldB").onclick = () => handleActivateShield("B");
+$("btnRestartTop").onclick = () => showScreen("screenSetup");
+$("btnPlayAgain").onclick = () => showScreen("screenSetup");
+$("btnToggleSfx").onclick = () => {
+  sfxEnabled = !sfxEnabled;
+  fxEngine.setSoundEnabled(sfxEnabled);
+  $("btnToggleSfx").textContent = sfxEnabled ? "🔊 SFX: ON" : "🔇 SFX: OFF";
+};
+
+$("styleBtnGroup").querySelectorAll("button").forEach((btn) => {
+  btn.onclick = () => {
+    $("styleBtnGroup").querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    selectedStyle = btn.dataset.style;
+    if (matchState) updateSelectedPreviewBar(matchState.players[mySide()]);
+  };
+});
+
+const openRulesFn = () => {
+  renderRulesAndAuditModal();
+  $("rulesModal").classList.remove("hidden");
+};
+$("btnOpenRules").onclick = openRulesFn;
+$("btnViewAudit").onclick = openRulesFn;
+$("btnCloseRules").onclick = () => $("rulesModal").classList.add("hidden");
+$("rulesModal").onclick = (e) => {
+  if (e.target === $("rulesModal")) $("rulesModal").classList.add("hidden");
+};
+
+renderPresetSummary();
+initDatabase();

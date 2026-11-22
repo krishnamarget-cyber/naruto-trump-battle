@@ -1,3 +1,309 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta name="theme-color" content="#101522"><title>Naruto Trump Battle</title><link rel="stylesheet" href="style.css"></head><body><main id="app"></main><script src="./firebase-config.js"></script>
-<script type="module" src="./onlineBridge.js"></script>
-<script src="app.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>Naruto Trump Battle — 120 Cards Online &amp; Pass &amp; Play</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">NARUTO TRUMP BATTLE <span class="tag">120 ONLINE</span></div>
+    <div class="topbar-actions">
+      <span id="roomHeaderBadge" class="pill hidden">ROOM: ------</span>
+      <button id="btnOpenRules" class="btn-ghost" type="button">📜 Rules &amp; Audit</button>
+      <button id="btnToggleSfx" class="btn-ghost" type="button">🔊 SFX: ON</button>
+      <button id="btnRestartTop" class="btn-ghost hidden" type="button">New Match</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- SCREEN 1: MATCH SETUP (PASS & PLAY + ROOM CODE ONLINE + COMPUTER) -->
+    <section id="screenSetup" class="panel">
+      <h1>1. Match Setup</h1>
+      <p class="sub">120-Card Roster · 5 Attack Styles · Captain 1.8× &amp; Vice 1.4× · Room Code Online &amp; Pass &amp; Play</p>
+
+      <div class="field">
+        <label>Play Mode</label>
+        <div class="btn-group" id="modeBtnGroup">
+          <button type="button" class="choice-btn active" data-mode="local">
+            <span>Pass &amp; Play (Same Device)</span>
+            <span class="btn-stat-sub">Two players alternate on one screen</span>
+          </button>
+          <button type="button" class="choice-btn" data-mode="online">
+            <span>Online Room Code (2 Devices)</span>
+            <span class="btn-stat-sub">Create or join with a 6-letter code</span>
+          </button>
+          <button type="button" class="choice-btn" data-mode="computer">
+            <span>Play vs Computer</span>
+            <span class="btn-stat-sub">Solo match against AI opponent</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ONLINE ROOM LOBBY BOX (identical layout to N13_firebase) -->
+      <div id="onlineRoomPanel" class="info-box hidden">
+        <div class="row-between" style="margin-bottom:8px;">
+          <strong>Room Code Lobby</strong>
+          <span id="roomConnStatus" class="pill">Not Connected</span>
+        </div>
+
+        <div class="grid-2" style="align-items:end;">
+          <div class="field" style="margin-bottom:0;">
+            <label for="roomCodeInput">Room Code (Create or Enter Code)</label>
+            <input id="roomCodeInput" type="text" maxlength="8" placeholder="e.g. X7K9M2" style="text-transform:uppercase;letter-spacing:2px;font-weight:800;" />
+          </div>
+          <div class="row-between" style="gap:8px;">
+            <button id="btnCreateRoom" class="btn-primary" type="button" style="flex:1;">Create Room</button>
+            <button id="btnJoinRoom" type="button" style="flex:1;">Join Room</button>
+          </div>
+        </div>
+
+        <div id="roomLobbyInfo" class="muted" style="margin-top:8px;">
+          Host creates a room code and shares it with Player 2. Both players lock moves simultaneously without peeking!
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="field">
+          <label for="playerAName">Player 1 Name (Host / Team A)</label>
+          <input id="playerAName" type="text" value="Player 1" />
+        </div>
+        <div class="field">
+          <label for="playerBName">Player 2 Name (Guest / Team B)</label>
+          <input id="playerBName" type="text" value="Player 2" />
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="field">
+          <label for="presetSelect">Match Preset</label>
+          <select id="presetSelect">
+            <option value="Quick">Quick Match — 10 Cards (10.00 HP)</option>
+            <option value="Standard" selected>Standard Match — 15 Cards (10.00 HP)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="metaSelect">Selection Algorithm</label>
+          <select id="metaSelect">
+            <option value="Balanced Meta" selected>Balanced Meta (All 5 Attack Styles)</option>
+            <option value="Dynamic Meta">Dynamic Meta (Random 3 Styles)</option>
+            <option value="Weakest Meta">Weakest Meta (Weakest 3 Styles)</option>
+            <option value="Random">Random Draft (15–16 Pool / Tier)</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="presetSummary" class="info-box"></div>
+      <div id="loadError" class="error-box hidden"></div>
+
+      <button id="btnDraftTeams" class="btn-primary full-width">Draft Teams &amp; Assign Leaders</button>
+    </section>
+
+    <!-- SCREEN 2: PRIVATE LEADER SELECTION -->
+    <section id="screenLeaders" class="panel hidden">
+      <div id="leaderCurtain" class="curtain">
+        <h2 id="curtainLeaderTitle">Pass Device to Player 1</h2>
+        <p id="curtainLeaderSub" class="sub">Keep the screen hidden from your opponent while choosing your Captain (1.8×) and Vice-Captain (1.4×).</p>
+        <button id="btnRevealLeaders" class="btn-primary">I Am Ready — Show My Roster</button>
+      </div>
+
+      <div id="leaderPickerContent" class="hidden">
+        <div class="row-between">
+          <h2 id="leaderHeader">Player 1 — Pick Captain &amp; Vice-Captain</h2>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <button id="btnViewAudit" class="btn-ghost" type="button">📊 Selection Audit</button>
+            <span id="leaderCountBadge" class="pill">15 Cards</span>
+          </div>
+        </div>
+        <p class="sub">
+          <b>Captain (1.8×):</b> 1.8× attack damage &amp; block shield &nbsp;|&nbsp;
+          <b>Vice-Captain (1.4×):</b> 1.4× attack damage &amp; block shield
+        </p>
+
+        <div class="stat-legend">
+          <span>Tier Avg Signal:</span>
+          <span class="sig-star">▲ +0.4+ Elite</span>
+          <span class="sig-high">▲ Above Tier Avg</span>
+          <span class="sig-mid">• Near Avg</span>
+          <span class="sig-low">▼ Below Tier Avg</span>
+        </div>
+
+        <div class="leader-status-bar">
+          <div>Captain: <strong id="chosenCapLabel" class="gold-text">None</strong></div>
+          <div>Vice-Captain: <strong id="chosenVcLabel" class="blue-text">None</strong></div>
+        </div>
+
+        <div id="leaderRosterGrid" class="card-grid"></div>
+
+        <button id="btnConfirmLeaders" class="btn-primary full-width" disabled>Confirm Leaders &amp; Pass Device</button>
+      </div>
+    </section>
+
+    <!-- SCREEN 3: LIVE BATTLE ARENA -->
+    <section id="screenArena" class="hidden">
+      <!-- TIER PROGRESSION BAR (L1 -> L2 -> L3 -> L4 -> L5 -> L6) -->
+      <div class="panel tier-prog-panel">
+        <div class="row-between">
+          <strong>Tier Progression (L1 → Special)</strong>
+          <span id="tierRemainingText" class="muted">Tier L1 Active</span>
+        </div>
+        <div id="tierStepper" class="tier-stepper"></div>
+      </div>
+
+      <!-- TOP SHARED HP & SHIELD HUD -->
+      <div class="hud-grid">
+        <div id="hudA" class="hud-card">
+          <div class="row-between">
+            <strong id="hudNameA">Player 1</strong>
+            <span id="hudStatusA" class="role-pill">READY</span>
+          </div>
+          <div class="hp-row">
+            <span id="hudHpTextA">10.00 / 10.00 HP</span>
+            <span id="hudArmorTextA" class="armor-badge hidden">+0.00 Temp HP</span>
+          </div>
+          <div class="bar-track">
+            <div id="hudHpBarA" class="bar-fill hp-fill" style="width:100%"></div>
+          </div>
+          <div class="shield-row">
+            <span>Shield Battery: <strong id="hudShieldTextA">0.00 / 2.00</strong></span>
+            <button id="btnShieldA" class="btn-shield" disabled>Use Shield (-2.00)</button>
+          </div>
+          <div class="bar-track small">
+            <div id="hudShieldBarA" class="bar-fill shield-fill" style="width:0%"></div>
+          </div>
+          <div class="muted" id="hudCardsLeftA">Cards Left: 15</div>
+        </div>
+
+        <div id="hudB" class="hud-card">
+          <div class="row-between">
+            <strong id="hudNameB">Player 2</strong>
+            <span id="hudStatusB" class="role-pill">WAITING</span>
+          </div>
+          <div class="hp-row">
+            <span id="hudHpTextB">10.00 / 10.00 HP</span>
+            <span id="hudArmorTextB" class="armor-badge hidden">+0.00 Temp HP</span>
+          </div>
+          <div class="bar-track">
+            <div id="hudHpBarB" class="bar-fill hp-fill" style="width:100%"></div>
+          </div>
+          <div class="shield-row">
+            <span>Shield Battery: <strong id="hudShieldTextB">0.00 / 2.00</strong></span>
+            <button id="btnShieldB" class="btn-shield" disabled>Use Shield (-2.00)</button>
+          </div>
+          <div class="bar-track small">
+            <div id="hudShieldBarB" class="bar-fill shield-fill" style="width:0%"></div>
+          </div>
+          <div class="muted" id="hudCardsLeftB">Cards Left: 15</div>
+        </div>
+      </div>
+
+      <!-- TURN BANNER & PASS CURTAIN -->
+      <div class="panel">
+        <div class="row-between">
+          <h2 id="turnBanner">Turn 1 — Level 1 Clash</h2>
+          <span id="tierLockBadge" class="pill">Active Tier: L1</span>
+        </div>
+
+        <!-- Privacy Curtain Between Player 1 & Player 2 Simultaneous Lock-Ins -->
+        <div id="turnCurtain" class="curtain">
+          <h3 id="turnCurtainTitle">Pass Device to Player 1</h3>
+          <p id="turnCurtainSub" class="sub">Pick your active tier fighter and Attack Style.</p>
+          <button id="btnRevealTurn" class="btn-primary">Reveal My Active Tier Cards</button>
+        </div>
+
+        <!-- Simultaneous Dual-Attack Move Controls -->
+        <div id="turnControls" class="hidden">
+          <div class="row-between">
+            <p class="sub" id="activeTierPrompt" style="margin:0">Tap a card below to mark it for battle:</p>
+            <div class="stat-legend compact">
+              <span class="sig-star">▲ +0.4+</span>
+              <span class="sig-high">▲ High</span>
+              <span class="sig-mid">• Avg</span>
+              <span class="sig-low">▼ Low</span>
+            </div>
+          </div>
+
+          <div id="handGrid" class="card-grid"></div>
+
+          <!-- Selected Card Live Preview Strip -->
+          <div id="selectedPreviewBar" class="selected-preview hidden"></div>
+
+          <div class="action-box">
+            <div class="field">
+              <label>Choose Your Attack Style (5 Styles)</label>
+              <div class="btn-group" id="styleBtnGroup">
+                <button type="button" class="choice-btn active" data-style="Taijutsu">Taijutsu (TAI)</button>
+                <button type="button" class="choice-btn" data-style="Ninjutsu">Ninjutsu (NIN)</button>
+                <button type="button" class="choice-btn" data-style="Genjutsu">Genjutsu (GEN)</button>
+                <button type="button" class="choice-btn" data-style="Kunai">Kunai (KUN)</button>
+                <button type="button" class="choice-btn" data-style="Special">Special (SPC)</button>
+              </div>
+            </div>
+
+            <button id="btnLockMove" class="btn-primary full-width" disabled>Select a Card Above to Lock Move</button>
+          </div>
+        </div>
+
+        <!-- Animated Battle Simulation & Visual Calc Panel -->
+        <div id="clashRevealPanel" class="reveal-box hidden">
+          <div class="row-between">
+            <h3 id="revealHeadline" style="margin:0">Simultaneous Clash Simulation</h3>
+            <button id="btnReplayAnim" class="btn-ghost hidden" type="button">↻ Replay Clash</button>
+          </div>
+
+          <!-- Live Sequential Animated Stage with 60fps Canvas VFX Layer -->
+          <div id="battleStage" class="battle-stage">
+            <div class="speedlines-bg"></div>
+            <canvas id="fxCanvas" class="fx-canvas"></canvas>
+            <div id="stageFighterA" class="stage-fighter"></div>
+            <div class="stage-center">
+              <div id="stageVfxBadge" class="vfx-badge">FACE OFF</div>
+              <div id="stageArrow" class="stage-arrow">⚔️</div>
+              <div id="stageStatusBanner" class="stage-status">Preparing Clash...</div>
+            </div>
+            <div id="stageFighterB" class="stage-fighter"></div>
+          </div>
+
+          <!-- Post-Animation Visual Calculation Cards -->
+          <div id="revealDetailsWrapper" class="hidden">
+            <div id="calcCardsGrid" class="calc-grid"></div>
+            <div id="revealNetSummary" class="net-summary-bar"></div>
+            <button id="btnNextTurn" class="btn-primary full-width">Continue to Next Turn</button>
+          </div>
+        </div>
+
+        <!-- Match Winner Banner -->
+        <div id="matchOverPanel" class="reveal-box hidden">
+          <h2 id="winnerTitle">Match Over!</h2>
+          <p id="winnerSummary" class="sub"></p>
+          <button id="btnPlayAgain" class="btn-primary full-width">Start New Match</button>
+        </div>
+      </div>
+
+      <!-- BATTLE HISTORY LOG -->
+      <details class="panel">
+        <summary>Match History Log</summary>
+        <div id="historyLog" class="history-list"></div>
+      </details>
+    </section>
+  </main>
+
+  <!-- RULES & DRAFT AUDIT MODAL -->
+  <div id="rulesModal" class="rules-modal hidden" role="dialog" aria-modal="true" aria-labelledby="rulesModalTitle">
+    <div class="rules-modal-card">
+      <div class="row-between" style="margin-bottom:8px;">
+        <div>
+          <h2 id="rulesModalTitle" style="margin:0;">Battle Rules &amp; Draft Audit</h2>
+          <p class="sub" style="margin:2px 0 0;">10.00 HP · Manual 2.00 Shield · Captain 1.8× &amp; Vice-Captain 1.4× · L1 → Special</p>
+        </div>
+        <button id="btnCloseRules" class="btn-ghost" type="button">✕ Close</button>
+      </div>
+      <div id="rulesModalBody" class="rules-body"></div>
+    </div>
+  </div>
+
+  <script src="./firebase-config.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

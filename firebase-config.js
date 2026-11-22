@@ -1,4 +1,4 @@
-// Firebase Web App Config (Naruto Trump Battle Nweb098 Online)
+// Firebase Web App Config (shared Realtime Database room sync)
 window.NTB_FIREBASE_CONFIG = {
   apiKey: "AIzaSyCb4niLNW-30ytOsbpjXsBrlfoFstVknV8",
   authDomain: "naruto-trump-battle.firebaseapp.com",
